@@ -9,6 +9,8 @@ from zoneinfo import ZoneInfo
 
 from dedupe import DedupeStore
 from acquisition import AcquisitionError, AcquisitionResult, acquire_candidate
+from buffer_publisher import BufferConfig, BufferPublisher
+from content_safety import check_third_party_content
 import orchestrator
 from rights_gate import pick_eligible
 from scanner import total_score
@@ -87,6 +89,7 @@ class ClipRadarTests(unittest.TestCase):
                  patch.object(orchestrator, "print_candidates"), \
                  patch.object(orchestrator, "acquire_candidate", side_effect=[AcquisitionError("first failed"), acquired]), \
                  patch.object(orchestrator, "render_vertical"), \
+                 patch.object(orchestrator, "check_transformation", return_value={"status": "TRANSFORMATION_CHECK_PASSED", "reason": "test"}), \
                  patch.object(orchestrator, "validate_final", return_value=(True, "ready_for_publish_queue")):
                 result=orchestrator.run_live(root/"output", root/"state.json", max_outputs=1, max_candidates=20)
         self.assertEqual(result["status"], "READY")
@@ -223,6 +226,79 @@ class ClipRadarTests(unittest.TestCase):
             restored = PublicationLedger(path)
             self.assertTrue(restored.is_active("clip123"))
             self.assertEqual(restored.get("clip123")["networks"]["tiktok"]["metricool_id"], "post123")
+
+    def test_third_party_content_check_fails_closed_for_obvious_broadcast_media(self):
+        result = check_third_party_content(
+            {"title": "Streamer reacts to a tournament broadcast", "game_name": "Just Chatting"},
+            [],
+        )
+        self.assertEqual(result["status"], "REVIEW_REQUIRED")
+
+    def test_buffer_dry_run_discovers_and_selects_real_channel_candidates(self):
+        class FakeResponse:
+            ok = True
+            status_code = 200
+            headers = {"X-RateLimit-Remaining": "2999"}
+
+            def __init__(self, payload):
+                self.payload = payload
+
+            def json(self):
+                return self.payload
+
+        class FakeSession:
+            def __init__(self):
+                self.calls = []
+                self.responses = [
+                    FakeResponse({"data": {"account": {"organizations": [{"id": "org-1", "name": "Clip Radar"}]}}}),
+                    FakeResponse({"data": {"channels": [
+                        {"id": "ig-1", "name": "Clip Radar Instagram", "service": "instagram"},
+                        {"id": "tt-1", "name": "Clip Radar TikTok", "service": "tiktok"},
+                        {"id": "yt-1", "name": "Clip Radar YouTube", "service": "youtube"},
+                    ]}}),
+                ]
+
+            def post(self, url, **kwargs):
+                self.calls.append(kwargs["json"]["query"])
+                return self.responses.pop(0)
+
+        with tempfile.TemporaryDirectory() as directory:
+            config = BufferConfig(
+                enabled=False,
+                dry_run=True,
+                networks=("tiktok", "instagram"),
+                timezone_name="Europe/Athens",
+                api_url="https://api.buffer.com",
+                api_key="test-only-key",
+                channel_config_path=Path(directory) / "buffer_channels.json",
+                brand_name="Clip Radar",
+                instagram_channel_id=None,
+                tiktok_channel_id=None,
+                youtube_channel_id=None,
+                media_url=None,
+            )
+            publisher = BufferPublisher(config=config, session=FakeSession())
+            clip = ValidatedClip(
+                candidate={
+                    "id": "clip123",
+                    "streamer": "xQc",
+                    "title": "A real eligible moment",
+                    "game_name": "Just Chatting",
+                    "url": "https://www.twitch.tv/xqc/clip/clip123",
+                },
+                final_path=Path(directory) / "final.mp4",
+                qc_status="ready_for_publish_queue",
+            )
+            with patch("buffer_publisher.validate_final", return_value=(True, "ready_for_publish_queue")):
+                plan = publisher.build_plan(clip, build_metadata("xQc", "A real eligible moment"))
+        self.assertEqual(plan["backend"], "buffer")
+        self.assertEqual(plan["channels"]["instagram"]["id"], "ig-1")
+        self.assertEqual(plan["channels"]["tiktok"]["id"], "tt-1")
+        self.assertEqual(plan["channel_discovery"]["api_calls"], 2)
+        self.assertEqual(set(plan["networks"]), {"instagram", "tiktok"})
+        self.assertFalse(plan["live_request_sent"])
+        self.assertEqual(plan["networks"]["instagram"]["input"]["metadata"]["instagram"]["type"], "reel")
+        self.assertEqual(plan["networks"]["tiktok"]["input"]["channelId"], "tt-1")
 
 
 if __name__ == "__main__":

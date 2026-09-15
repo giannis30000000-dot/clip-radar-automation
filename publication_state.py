@@ -27,6 +27,7 @@ PIPELINE_STATES = {
     "PUBLISHED",
     "FAILED",
     "SKIPPED",
+    "REVIEW_REQUIRED",
 }
 
 
@@ -79,6 +80,13 @@ class PublicationLedger:
             if self.is_active(clip_id) or self.is_published(clip_id):
                 count += 1
         return count
+
+    def has_failed_network(self, clip_id: str) -> bool:
+        record = self.get(clip_id) or {}
+        return any(
+            network.get("status") == "FAILED"
+            for network in (record.get("networks") or {}).values()
+        )
 
     def upsert_clip(self, clip_id: str, status: str, **metadata: Any) -> dict[str, Any]:
         if status not in PIPELINE_STATES:

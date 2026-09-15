@@ -2,14 +2,15 @@
 
 The production path is now:
 
-`Twitch Helix discovery -> viral ranking -> sharing_whitelist.json -> public Twitch clip acquisition -> source validation -> local Whisper transcription -> 9:16 edit -> QC -> gated Metricool plan -> artifacts`
+`Twitch Helix discovery -> viral ranking -> sharing_whitelist.json -> public Twitch clip acquisition -> source validation -> local Whisper transcription -> 9:16 edit -> QC -> rights/content safety -> gated Buffer plan -> artifacts`
 
 `orchestrator.py` writes the original landscape MP4 to
 `output/sources/`, the edited vertical MP4 to `output/final/`, and a structured
 `output/run_summary.json`. With `PUBLISHING_ENABLED=false` and
 `PUBLISHING_DRY_RUN=true`, it also writes `output/publishing_plan.json`. The
-GitHub Action uploads all four as separate artifacts for inspection and does
-not contact Metricool.
+GitHub Action uploads the source, final, run summary, Buffer plan, and state
+audit as separate artifacts for inspection. Dry-run performs read-only Buffer
+account/channel discovery and does not create posts.
 
 ## Acquisition and rights
 
@@ -30,48 +31,43 @@ without changing the ranking or QC stages.
 restores and saves the ledger using a unique per-run cache key with a branch
 prefix, so later hourly runs skip clips already prepared or published. The
 cache is durable under GitHub's cache retention policy; the ledger never
-silently forgets an ID. Publishing remains intentionally absent from the
-workflow.
-
-## Dedupe and publishing safety
-
-`state/processed_clips.json` is keyed by immutable Twitch clip ID. The Action
-restores and saves the ledger using a unique per-run cache key with a branch
-prefix, so later hourly runs skip clips already prepared or published. The
-cache is durable under GitHub's cache retention policy; the ledger never
 silently forgets an ID. `state/publications.json` is a separate publication
 ledger with independent per-network state and analytics-ready fields. Its
 state machine is:
 
-`DISCOVERED -> ELIGIBLE -> ACQUIRED -> RENDERED -> QC_PASSED -> QUEUED -> PUBLISHING -> PUBLISHED`
+`DISCOVERED -> ELIGIBLE -> ACQUIRED -> RENDERED -> QC_PASSED -> PUBLISH_ELIGIBLE -> QUEUED -> PUBLISHING -> PUBLISHED`
 
-with `FAILED` and `SKIPPED` terminal paths. The publisher refuses unverified
-broadcasters, missing immutable clip IDs, failed QC, duplicate active or
-successful states, and YouTube unless `ENABLE_YOUTUBE_PUBLISHING=true`. It
-uses bounded retries for transient scheduler failures and marks ambiguous
-requests failed instead of replaying indefinitely.
+with `FAILED`, `SKIPPED`, and `REVIEW_REQUIRED` paths. Every candidate must
+have an accepted documented rights basis. The conservative content check
+routes obvious movie/TV/music/broadcast/rebroadcast signals to review, and
+the transformation check requires the editorial hook, pacing policy, reframed
+composition, transcript subtitles, branding, and attribution profile. Unknown
+or uncertain rights never publish.
 
-## Metricool dry run and production schedule
+## Buffer dry run and production schedule
 
-`metricool_publisher.py` generates platform-specific metadata from the Twitch
-title, broadcaster, game, source URL, and transcript context. The plan includes
-TikTok and Instagram Reel payloads and still generates YouTube Shorts metadata
-for review, while YouTube posting stays disabled. The next local-time slot is
-selected from `12:00, 15:30, 19:00, 22:00` in `Europe/Athens`. The publisher
-reserves a different next slot for each plan and enforces
-`MAX_DAILY_PUBLICATIONS=4` by local date. Hourly discovery can therefore find
-a stronger eligible clip without forcing weak content to fill a quota.
+`buffer_publisher.py` is the active backend; `metricool_publisher.py` remains an
+optional inactive adapter. Buffer discovery queries the authenticated account,
+organizations, and channels, then selects the unique Clip Radar-named or
+otherwise unique Instagram/TikTok channel. Ambiguous channels fail closed and
+require an explicit channel ID; IDs are cached in `state/buffer_channels.json`
+without the API key. The plan contains the discovered channel ID and name,
+platform-specific metadata, and the GraphQL `createPost` input.
 
-Live Metricool scheduling is deliberately not enabled in the checked-in
-workflow. When authorized later, it requires all three repository secrets
-`METRICOOL_USER_TOKEN`, `METRICOOL_USER_ID`, and `METRICOOL_BLOG_ID`, plus an
-explicit `PUBLISHING_ENABLED=true` change. The token is sent only in the
-`X-Mc-Auth` header and is never written to logs or artifacts. The first live
-test remains limited to TikTok and Instagram; YouTube is off until the account
-is recovered.
+The target slots are `12:00, 15:30, 19:00, 22:00` in `Europe/Athens`. The
+publisher reserves distinct slots and enforces `MAX_DAILY_PUBLICATIONS=4` by
+local date. These are an upper bound, not quotas; hourly discovery still uses
+the strongest currently available eligible candidate and never forces category
+diversity. YouTube remains disabled until the account is recovered and its
+Buffer channel is connected.
+
+Buffer's API does not upload local files. Live mode therefore requires
+`BUFFER_MEDIA_URL`, a stable public HTTPS MP4 URL that remains reachable until
+the scheduled post publishes. A GitHub Actions artifact URL is not suitable.
 
 ## Required Action secrets
 
-Configure `TWITCH_CLIENT_ID` and `TWITCH_CLIENT_SECRET` as GitHub Actions
-secrets. The existing scanner uses those credentials only for Twitch Helix
-discovery. They are never printed or passed to the public media downloader.
+Configure `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, and `BUFFER_API_KEY` as
+GitHub Actions secrets. The Twitch credentials are used only for Helix
+discovery; the Buffer key is sent only as a Bearer token to `api.buffer.com`.
+Secret values are never printed, written to artifacts, or committed.

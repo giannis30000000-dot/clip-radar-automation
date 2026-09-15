@@ -2,6 +2,7 @@
   "verified": {
     "xqc": {
       "viewer_social_sharing": true,
+      "rights_basis": "VERIFIED_TWITCH_SOCIAL_SHARING",
       "verified_via": "authenticated Twitch clip Share menu showing YouTube, TikTok and Instagram",
       "verified_on": "2026-09-15"
     }

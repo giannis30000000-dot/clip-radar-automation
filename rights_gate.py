@@ -8,6 +8,13 @@ import json
 from pathlib import Path
 
 WHITELIST = Path(__file__).with_name("sharing_whitelist.json")
+ACCEPTED_RIGHTS_BASES = {
+    "VERIFIED_TWITCH_SOCIAL_SHARING",
+    "EXPLICIT_CREATOR_PERMISSION",
+    "TEAM_OR_RIGHTSHOLDER_PERMISSION",
+    "LICENSED_PROVIDER",
+    "OTHER_VERIFIED_COMMERCIAL_LICENSE",
+}
 
 
 def load_verified():
@@ -15,18 +22,29 @@ def load_verified():
     return {k.lower():v for k,v in data.get("verified",{}).items() if v.get("viewer_social_sharing") is True}
 
 
-def eligible_broadcaster(candidate):
+def rights_evidence(candidate):
     broadcaster=(candidate.get("streamer") or candidate.get("broadcaster_name") or candidate.get("broadcaster") or "").strip().lower()
-    return broadcaster if broadcaster in load_verified() else None
+    entry=load_verified().get(broadcaster)
+    if not entry:
+        return {"status":"REVIEW_REQUIRED","reason":"sharing_not_verified","broadcaster":broadcaster}
+    basis=entry.get("rights_basis") or "VERIFIED_TWITCH_SOCIAL_SHARING"
+    if basis not in ACCEPTED_RIGHTS_BASES:
+        return {"status":"REVIEW_REQUIRED","reason":"unknown_rights_basis","broadcaster":broadcaster,"rights_basis":basis}
+    return {"status":"RIGHTS_VERIFIED","reason":"documented_verified_broadcaster_entry","broadcaster":broadcaster,"rights_basis":basis,"verified_via":entry.get("verified_via")}
+
+
+def eligible_broadcaster(candidate):
+    evidence=rights_evidence(candidate)
+    return evidence["broadcaster"] if evidence["status"] == "RIGHTS_VERIFIED" else None
 
 
 def pick_eligible(ranked_candidates, limit=4):
     verified=load_verified(); selected=[]; skipped=[]
     for c in ranked_candidates:
-        broadcaster=(c.get("streamer") or c.get("broadcaster_name") or c.get("broadcaster") or "").strip().lower()
-        if broadcaster in verified:
+        evidence=rights_evidence(c)
+        if evidence["status"] == "RIGHTS_VERIFIED":
             selected.append(c)
             if len(selected)>=limit: break
         else:
-            skipped.append({"candidate":c,"reason":"sharing_not_verified","broadcaster":broadcaster})
+            skipped.append({"candidate":c,"reason":evidence["reason"],"broadcaster":evidence["broadcaster"]})
     return selected, skipped

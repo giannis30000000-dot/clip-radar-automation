@@ -20,6 +20,7 @@ from typing import Any, Mapping
 import requests
 
 from publication_state import PublicationLedger
+from publication_types import ValidatedClip
 from quality_control import validate_final
 from rights_gate import eligible_broadcaster
 from schedule_slots import DEFAULT_TIMEZONE, next_production_slot
@@ -105,13 +106,6 @@ class MetricoolConfig:
             "credentials_configured": not self.missing_credentials(),
             "credential_names": list(REQUIRED_CREDENTIALS),
         }
-
-
-@dataclass(frozen=True)
-class ValidatedClip:
-    candidate: Mapping[str, Any]
-    final_path: Path
-    qc_status: str
 
 
 def _candidate_fields(candidate: Mapping[str, Any]) -> dict[str, Any]:

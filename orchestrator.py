@@ -14,14 +14,18 @@ from pathlib import Path
 from typing import Any
 
 from acquisition import AcquisitionError, acquire_candidate, candidate_clip_id
+from content_safety import check_third_party_content
 from dedupe import DedupeStore
 from media_processor import render_vertical
 from pipeline import Candidate, eligible_for_edit
 from publish_plan import build_metadata
 from publication_state import PublicationLedger
+from publication_types import ValidatedClip
+from publisher_factory import configured_backend, create_publisher
 from quality_control import validate_final
-from rights_gate import pick_eligible
+from rights_gate import pick_eligible, rights_evidence
 from scanner import print_candidates, scan_candidates
+from transformation_check import check_transformation
 
 
 def _as_candidate(raw: dict[str, Any]) -> Candidate:
@@ -85,12 +89,13 @@ def run_live(
     store = DedupeStore(state_file)
     publishing_enabled = _env_bool("PUBLISHING_ENABLED")
     publishing_dry_run = _env_bool("PUBLISHING_DRY_RUN")
+    publishing_backend = configured_backend()
     publisher = None
     publication_ledger = None
     if publishing_enabled or publishing_dry_run:
-        from metricool_publisher import MetricoolPublisher
-
-        publisher = MetricoolPublisher()
+        publisher = create_publisher()
+        if publisher is None:
+            raise RuntimeError("publishing is enabled but PUBLISHER_BACKEND is not configured")
         publication_ledger = PublicationLedger(
             Path(os.getenv("CLIP_RADAR_PUBLICATION_STATE_FILE", "state/publications.json"))
         )
@@ -118,6 +123,7 @@ def run_live(
         "outputs": [],
         "publishing_enabled": publishing_enabled,
         "publishing_dry_run": publishing_dry_run,
+        "publishing_backend": publishing_backend,
         "publishing_plans": [],
     }
     if publisher:
@@ -129,7 +135,10 @@ def run_live(
     for raw in eligible:
         clip_id = candidate_clip_id(raw)
         candidate = _as_candidate(raw)
-        if store.contains(clip_id):
+        retry_failed_publication = bool(
+            publisher and publication_ledger and publication_ledger.has_failed_network(clip_id)
+        )
+        if store.contains(clip_id) and not retry_failed_publication:
             print(f"dedupe | SKIP | {clip_id} | already_prepared_or_published")
             summary["attempts"].append({"clip_id": clip_id, "status": "DEDUPED"})
             continue
@@ -186,7 +195,11 @@ def run_live(
             )
             final_dir.mkdir(parents=True, exist_ok=True)
             final_path = final_dir / f"{clip_id}_clipradar_vertical.mp4"
-            caption_entries = render_vertical(acquired.path, final_path, hook=candidate.title[:55])
+            caption_entries = render_vertical(
+                acquired.path,
+                final_path,
+                hook=f"{candidate.streamer}: {candidate.title}"[:55],
+            )
             _record_publication_state(
                 publication_ledger,
                 raw,
@@ -204,14 +217,32 @@ def run_live(
                 source_url=candidate.url,
                 transcript_entries=caption_entries,
             )
+            third_party_check = check_third_party_content(raw, caption_entries)
+            transformation_check = check_transformation(raw, final_path, caption_entries, metadata)
             attempt.update(
                 {
                     "status": "READY",
                     "final": str(final_path),
                     "final_validation": reason,
                     "metadata": metadata,
+                    "third_party_check": third_party_check,
+                    "transformation_check": transformation_check,
                 }
             )
+            if third_party_check["status"] != "THIRD_PARTY_CHECK_PASSED" or transformation_check["status"] != "TRANSFORMATION_CHECK_PASSED":
+                attempt["status"] = "REVIEW_REQUIRED"
+                _record_publication_state(
+                    publication_ledger,
+                    raw,
+                    "REVIEW_REQUIRED",
+                    rights_basis=rights_evidence(raw).get("rights_basis"),
+                    third_party_check=third_party_check,
+                    transformation_check=transformation_check,
+                )
+                final_path.unlink(missing_ok=True)
+                summary["attempts"].append(attempt)
+                print(f"safety | REVIEW_REQUIRED | clip_id={clip_id} | third_party={third_party_check['status']} | transformation={transformation_check['status']}")
+                continue
             store.record(
                 clip_id,
                 "prepared",
@@ -236,17 +267,18 @@ def run_live(
                 "resolution=720x1280 | audio=present | subtitles=present | branding=present"
             )
             if publisher and publication_ledger:
-                from metricool_publisher import ValidatedClip
-
                 validated_clip = ValidatedClip(
                     candidate=raw,
                     final_path=final_path,
                     qc_status=reason,
+                    rights_basis=rights_evidence(raw)["rights_basis"],
+                    third_party_check=third_party_check["status"],
+                    transformation_check=transformation_check["status"],
                 )
                 plan = publisher.build_plan(validated_clip, metadata)
                 publication_ledger.upsert_clip(
                     clip_id,
-                    "QC_PASSED",
+                    "PUBLISH_ELIGIBLE",
                     broadcaster=candidate.streamer,
                     source_url=candidate.url,
                     final_output_identifier=str(final_path),
@@ -255,6 +287,9 @@ def run_live(
                     views=candidate.views,
                     game=str(raw.get("game_name") or ""),
                     publication_slot=plan["publication_slot"],
+                    rights_basis=validated_clip.rights_basis,
+                    third_party_check=validated_clip.third_party_check,
+                    transformation_check=validated_clip.transformation_check,
                 )
                 summary["publishing_plans"].append(plan)
                 summary["publishing"]["plans"].append(plan)
