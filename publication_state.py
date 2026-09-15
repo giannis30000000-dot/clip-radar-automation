@@ -68,6 +68,18 @@ class PublicationLedger:
             for network in (record.get("networks") or {}).values()
         )
 
+    def count_scheduled_on_date(self, local_date: str) -> int:
+        """Count unique clips already active or published on a local date."""
+
+        count = 0
+        for clip_id, record in (self._data.get("clips") or {}).items():
+            slot = record.get("publication_slot") or {}
+            if str(slot.get("date_time", ""))[:10] != local_date:
+                continue
+            if self.is_active(clip_id) or self.is_published(clip_id):
+                count += 1
+        return count
+
     def upsert_clip(self, clip_id: str, status: str, **metadata: Any) -> dict[str, Any]:
         if status not in PIPELINE_STATES:
             raise ValueError(f"invalid publication state: {status}")

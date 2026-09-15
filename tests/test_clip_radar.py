@@ -166,6 +166,28 @@ class ClipRadarTests(unittest.TestCase):
         self.assertFalse(plan["live_request_sent"])
         self.assertFalse(plan["configuration"]["credentials_configured"])
 
+    def test_metricool_reserves_distinct_production_slots(self):
+        config = MetricoolConfig(
+            enabled=False,
+            dry_run=True,
+            networks=("tiktok", "instagram"),
+            timezone_name="Europe/Athens",
+            base_url="https://app.metricool.com/api",
+            user_token=None,
+            user_id=None,
+            blog_id=None,
+        )
+        publisher = MetricoolPublisher(config=config)
+        metadata = build_metadata("xQc", "A real eligible moment")
+        candidates = [
+            {"id": "clip123", "streamer": "xQc", "title": "A real eligible moment", "url": "https://twitch.tv/xqc/clip/clip123"},
+            {"id": "clip456", "streamer": "xQc", "title": "Another real eligible moment", "url": "https://twitch.tv/xqc/clip/clip456"},
+        ]
+        with patch("metricool_publisher.validate_final", return_value=(True, "ready_for_publish_queue")):
+            first = publisher.build_plan(ValidatedClip(candidates[0], Path("one.mp4"), "ready_for_publish_queue"), metadata)
+            second = publisher.build_plan(ValidatedClip(candidates[1], Path("two.mp4"), "ready_for_publish_queue"), metadata)
+        self.assertNotEqual(first["publication_slot"]["date_time"], second["publication_slot"]["date_time"])
+
     def test_metricool_refuses_youtube_until_explicitly_enabled(self):
         with patch.dict(os.environ, {"METRICOOL_NETWORKS": "tiktok,instagram,youtube", "ENABLE_YOUTUBE_PUBLISHING": "false"}, clear=False):
             with self.assertRaises(PublicationBlocked):

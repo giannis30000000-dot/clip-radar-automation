@@ -94,3 +94,10 @@ jobs:
           name: clip-radar-publishing-dry-run-${{ github.run_id }}
           path: output/publishing_plan.json
           if-no-files-found: warn
+      - name: Upload publication state audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clip-radar-publication-state-${{ github.run_id }}
+          path: state/publications.json
+          if-no-files-found: warn

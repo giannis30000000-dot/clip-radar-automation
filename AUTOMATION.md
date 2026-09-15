@@ -57,8 +57,10 @@ requests failed instead of replaying indefinitely.
 title, broadcaster, game, source URL, and transcript context. The plan includes
 TikTok and Instagram Reel payloads and still generates YouTube Shorts metadata
 for review, while YouTube posting stays disabled. The next local-time slot is
-selected from `12:00, 15:30, 19:00, 22:00` in `Europe/Athens`. Hourly discovery
-can therefore find a stronger eligible clip without forcing a daily quota.
+selected from `12:00, 15:30, 19:00, 22:00` in `Europe/Athens`. The publisher
+reserves a different next slot for each plan and enforces
+`MAX_DAILY_PUBLICATIONS=4` by local date. Hourly discovery can therefore find
+a stronger eligible clip without forcing weak content to fill a quota.
 
 Live Metricool scheduling is deliberately not enabled in the checked-in
 workflow. When authorized later, it requires all three repository secrets

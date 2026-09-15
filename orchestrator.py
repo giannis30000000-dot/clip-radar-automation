@@ -254,11 +254,12 @@ def run_live(
                     viral_score=candidate.score,
                     views=candidate.views,
                     game=str(raw.get("game_name") or ""),
+                    publication_slot=plan["publication_slot"],
                 )
                 summary["publishing_plans"].append(plan)
                 summary["publishing"]["plans"].append(plan)
                 if publishing_enabled:
-                    result = publisher.publish(validated_clip, metadata, publication_ledger)
+                    result = publisher.publish(validated_clip, metadata, publication_ledger, plan=plan)
                     summary["publishing"]["results"].append(result)
                     attempt["publication"] = result
             if len(summary["outputs"]) >= max_outputs:

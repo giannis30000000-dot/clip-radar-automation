@@ -69,6 +69,7 @@ class MetricoolConfig:
     user_token: str | None
     user_id: str | None
     blog_id: str | None
+    max_daily_publications: int = 4
 
     @classmethod
     def from_env(cls) -> "MetricoolConfig":
@@ -81,6 +82,7 @@ class MetricoolConfig:
             user_token=os.getenv("METRICOOL_USER_TOKEN") or None,
             user_id=os.getenv("METRICOOL_USER_ID") or None,
             blog_id=os.getenv("METRICOOL_BLOG_ID") or None,
+            max_daily_publications=max(1, int(os.getenv("MAX_DAILY_PUBLICATIONS", "4"))),
         )
 
     def missing_credentials(self) -> list[str]:
@@ -97,6 +99,7 @@ class MetricoolConfig:
             "dry_run": self.dry_run,
             "networks": list(self.networks),
             "youtube_enabled": "youtube" in self.networks,
+            "max_daily_publications": self.max_daily_publications,
             "timezone": self.timezone_name,
             "base_url": self.base_url,
             "credentials_configured": not self.missing_credentials(),
@@ -129,6 +132,7 @@ class MetricoolPublisher:
     def __init__(self, config: MetricoolConfig | None = None, session: requests.Session | None = None):
         self.config = config or MetricoolConfig.from_env()
         self.session = session or requests.Session()
+        self._last_planned_slot: datetime | None = None
 
     def validate_input(self, clip: ValidatedClip) -> None:
         if not clip.candidate.get("id") and not clip.candidate.get("clip_id"):
@@ -148,7 +152,12 @@ class MetricoolPublisher:
         slot: datetime | None = None,
     ) -> dict[str, Any]:
         self.validate_input(clip)
-        slot = slot or next_production_slot(timezone_name=self.config.timezone_name)
+        if slot is None:
+            slot = next_production_slot(
+                now=self._last_planned_slot,
+                timezone_name=self.config.timezone_name,
+            )
+        self._last_planned_slot = slot
         fields = _candidate_fields(clip.candidate)
         requests_by_network: dict[str, dict[str, Any]] = {}
         for network in self.config.networks:
@@ -204,7 +213,13 @@ class MetricoolPublisher:
             "live_request_sent": False,
         }
 
-    def publish(self, clip: ValidatedClip, metadata: Mapping[str, Any], ledger: PublicationLedger) -> dict[str, Any]:
+    def publish(
+        self,
+        clip: ValidatedClip,
+        metadata: Mapping[str, Any],
+        ledger: PublicationLedger,
+        plan: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Upload and schedule one validated clip, one network at a time."""
 
         if not self.config.enabled:
@@ -214,10 +229,15 @@ class MetricoolPublisher:
         missing = self.config.missing_credentials()
         if missing:
             raise PublicationBlocked("missing Metricool configuration: " + ", ".join(missing))
-        plan = self.build_plan(clip, metadata)
+        plan = plan or self.build_plan(clip, metadata)
         clip_id = plan["candidate"]["clip_id"]
         if ledger.is_published(clip_id) or ledger.is_active(clip_id):
             raise PublicationBlocked("clip already has active or successful publication state")
+        local_date = str(plan["publication_slot"]["date_time"])[:10]
+        if ledger.count_scheduled_on_date(local_date) >= self.config.max_daily_publications:
+            raise PublicationBlocked(
+                f"daily publication cap reached for {local_date} ({self.config.max_daily_publications})"
+            )
         ledger.upsert_clip(
             clip_id,
             "PUBLISHING",
