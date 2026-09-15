@@ -3,8 +3,8 @@ name: Clip Radar Scan
 on:
   workflow_dispatch:
   schedule:
-    # GitHub cron uses UTC. Runs 4x/day to catch fresh clips.
-    - cron: '15 5,10,15,20 * * *'
+    # Hourly discovery so fresh viral moments are detected early.
+    - cron: '17 * * * *'
 
 permissions:
   contents: read
@@ -16,7 +16,7 @@ jobs:
     env:
       TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
       TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
-      STREAMERS: xqc,kaicenat,jynxzi,caseoh_
+      STREAMERS: xqc,kaicenat,jynxzi,caseoh_,stableronaldo,zackrawrr,sodapoppin,lacy
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,5 +26,5 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Run fresh clip scan
+      - name: Run fresh viral clip scan
         run: python scanner.py
