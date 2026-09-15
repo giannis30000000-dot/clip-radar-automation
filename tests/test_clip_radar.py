@@ -396,6 +396,8 @@ class ClipRadarTests(unittest.TestCase):
         self.assertEqual(first["verification"]["status"], "PUBLIC_HTTPS_MP4_VERIFIED")
         self.assertEqual(second["public_url"], first["public_url"])
         self.assertEqual(len([item for item in session.posts if item[0].endswith("/video/upload")]), 1)
+        upload_call = next(item for item in session.posts if item[0].endswith("/video/upload"))
+        self.assertEqual(upload_call[1]["auth"], ("key", "secret"))
         self.assertNotIn("secret", json.dumps(saved))
 
     def test_cloudinary_cleanup_skips_queued_assets_and_deletes_expired_safe_asset(self):

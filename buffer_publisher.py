@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
+from zoneinfo import ZoneInfo
 
 import requests
 from urllib.parse import urlparse
@@ -126,6 +127,23 @@ class BufferDiscovery:
 
 def _env_bool(name: str, default: bool = False) -> bool:
     return os.getenv(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _scheduled_override(value: str | None, timezone_name: str) -> datetime | None:
+    """Parse an explicit UTC/offset schedule used only by controlled live tests."""
+
+    if not value or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise PublicationBlocked("BUFFER_SCHEDULE_AT must be an ISO-8601 timestamp") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    try:
+        return parsed.astimezone(ZoneInfo(timezone_name))
+    except (KeyError, ValueError) as exc:
+        raise PublicationBlocked(f"invalid production timezone: {timezone_name}") from exc
 
 
 def _safe_rate_limits(response: requests.Response) -> dict[str, str]:
@@ -250,7 +268,16 @@ class BufferPublisher:
         self.validate_input(clip)
         discovery = self.discover_channels(force=_env_bool("BUFFER_REFRESH_CHANNELS"))
         if slot is None:
-            slot = next_production_slot(now=self._last_planned_slot, timezone_name=self.config.timezone_name)
+            slot = _scheduled_override(
+                os.getenv("BUFFER_SCHEDULE_AT"), self.config.timezone_name
+            )
+            schedule_source = "controlled_schedule_override" if slot else "next_available_production_slot"
+            if slot is None:
+                slot = next_production_slot(
+                    now=self._last_planned_slot, timezone_name=self.config.timezone_name
+                )
+        else:
+            schedule_source = "explicit_slot"
         self._last_planned_slot = slot
         fields = _candidate_fields(clip.candidate)
         media_url = media_url or self.config.media_url or "<PUBLIC_BUFFER_MEDIA_URL_REQUIRED>"
@@ -303,7 +330,7 @@ class BufferPublisher:
                 "timezone": self.config.timezone_name,
                 "local_date_time": slot.strftime("%Y-%m-%dT%H:%M:%S"),
                 "utc_date_time": due_at,
-                "source": "next_available_production_slot",
+                "source": schedule_source,
             },
             "channel_discovery": discovery.as_dict(),
             "channels": {network: discovery.selected[network] for network in discovery.selected if network in self.config.networks},

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from acquisition import AcquisitionError, acquire_candidate, candidate_clip_id
-from cloudinary_media_host import CloudinaryMediaHost
+from cloudinary_media_host import CloudinaryAPIError, CloudinaryMediaHost, MediaDeliveryBlocked
 from content_safety import check_third_party_content
 from dedupe import DedupeStore
 from media_processor import render_vertical
@@ -48,6 +48,17 @@ def _write_summary(path: Path, summary: dict[str, Any]) -> None:
 
 def _env_bool(name: str, default: bool = False) -> bool:
     return os.getenv(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_fatal_media_delivery_error(error: Exception) -> bool:
+    """Stop the run on provider/configuration failures instead of burning candidates."""
+
+    if isinstance(error, CloudinaryAPIError):
+        return error.status_code in {401, 403}
+    if isinstance(error, MediaDeliveryBlocked):
+        message = str(error).lower()
+        return "missing cloudinary configuration" in message or "active-object safety limit" in message
+    return False
 
 
 def _record_publication_state(
@@ -277,8 +288,6 @@ def run_live(
                 views=candidate.views,
                 game=str(raw.get("game_name") or ""),
             )
-            summary["outputs"].append(attempt)
-            summary["attempts"].append(attempt)
             print(
                 f"qc | PASS | clip_id={clip_id} | final={final_path} | "
                 "resolution=720x1280 | audio=present | subtitles=present | branding=present"
@@ -341,9 +350,16 @@ def run_live(
                     summary["publishing"]["results"].append(result)
                     attempt["publication"] = result
                     if media_host:
-                        attempt["cloudinary_delivery"] = media_host.mark_buffer_result(
+                        marked_delivery = media_host.mark_buffer_result(
                             clip_id, result, publication_ledger
                         )
+                        attempt["cloudinary_delivery"] = marked_delivery
+                        for index, delivery in enumerate(summary["cloudinary_deliveries"]):
+                            if delivery.get("public_id") == marked_delivery.get("public_id"):
+                                summary["cloudinary_deliveries"][index] = marked_delivery
+                                break
+            summary["outputs"].append(attempt)
+            summary["attempts"].append(attempt)
             if len(summary["outputs"]) >= max_outputs:
                 break
         except Exception as exc:
@@ -351,6 +367,8 @@ def run_live(
             attempt["reason"] = str(exc)
             print(f"candidate | FAIL | clip_id={clip_id} | reason={exc}")
             summary["attempts"].append(attempt)
+            if _is_fatal_media_delivery_error(exc):
+                raise
 
     if summary["outputs"]:
         summary["status"] = "READY"

@@ -1,9 +1,9 @@
 """Cloudinary delivery bridge for already publishable Clip Radar videos.
 
 Cloudinary is deliberately used only as a temporary public delivery layer for
-Buffer.  The adapter signs server-side Upload API requests, verifies the
-resulting public URL with a small ranged probe, reuses verified uploads, and
-records only non-secret delivery metadata in the publication ledger.
+Buffer.  The adapter authenticates server-side Upload API requests, verifies
+the resulting public URL with a small ranged probe, reuses verified uploads,
+and records only non-secret delivery metadata in the publication ledger.
 """
 
 from __future__ import annotations
@@ -29,6 +29,10 @@ class MediaDeliveryBlocked(RuntimeError):
 
 class CloudinaryAPIError(RuntimeError):
     """Raised for an unusable Cloudinary response."""
+
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 ACTIVE_MEDIA_STATUSES = {
@@ -58,9 +62,9 @@ class CloudinaryConfig:
     @classmethod
     def from_env(cls) -> "CloudinaryConfig":
         return cls(
-            cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME") or None,
-            api_key=os.getenv("CLOUDINARY_API_KEY") or None,
-            api_secret=os.getenv("CLOUDINARY_API_SECRET") or None,
+            cloud_name=(os.getenv("CLOUDINARY_CLOUD_NAME") or "").strip() or None,
+            api_key=(os.getenv("CLOUDINARY_API_KEY") or "").strip() or None,
+            api_secret=(os.getenv("CLOUDINARY_API_SECRET") or "").strip() or None,
             folder=_safe_folder(os.getenv("CLOUDINARY_FOLDER", "clipradar/buffer")),
             retention_hours=max(1, int(os.getenv("CLOUDINARY_RETENTION_HOURS", "48"))),
             abandoned_retention_hours=max(
@@ -174,6 +178,23 @@ def _redact_error(value: Any, config: CloudinaryConfig) -> str:
         if secret:
             message = message.replace(secret, "<redacted>")
     return message[:500]
+
+
+def _response_error_message(response: Any, fallback: str) -> str:
+    """Extract a short provider diagnostic without retaining the response body."""
+
+    try:
+        payload = response.json()
+    except (ValueError, TypeError, AttributeError):
+        return fallback
+    if not isinstance(payload, dict):
+        return fallback
+    error = payload.get("error")
+    if isinstance(error, dict):
+        message = error.get("message")
+    else:
+        message = error
+    return str(message or fallback)[:300]
 
 
 class CloudinaryMediaHost:
@@ -434,25 +455,24 @@ class CloudinaryMediaHost:
             if clip_id == current_clip_id:
                 continue
             media = record.get("media_delivery") or {}
-            if media.get("provider") == "cloudinary" and media.get("status") in ACTIVE_MEDIA_STATUSES:
+            if (
+                media.get("provider") == "cloudinary"
+                and media.get("public_id")
+                and media.get("status") != "DELETED"
+            ):
                 count += 1
         return count
 
     def _upload(self, final_path: Path, public_id: str) -> dict[str, Any]:
-        timestamp = int(self.clock().timestamp())
-        signed_params = {
+        # Cloudinary documents HTTP Basic Auth as the simplest server-side
+        # upload authentication path. It avoids a second source of failure
+        # from hand-built signatures while keeping the credentials in the
+        # HTTPS request only; they are never included in persisted metadata.
+        data = {
             "overwrite": "true",
             "public_id": public_id,
-            "timestamp": str(timestamp),
             "type": "upload",
         }
-        data = dict(signed_params)
-        data.update(
-            {
-                "api_key": self.config.api_key,
-                "signature": _signature(signed_params, self.config.api_secret or ""),
-            }
-        )
         url = f"{self.config.api_url}/v1_1/{self.config.cloud_name}/video/upload"
         try:
             with final_path.open("rb") as video_file:
@@ -460,19 +480,29 @@ class CloudinaryMediaHost:
                     url,
                     data=data,
                     files={"file": (final_path.name, video_file, "video/mp4")},
+                    auth=(self.config.api_key, self.config.api_secret),
                     timeout=300,
                 )
             self.api_calls += 1
             self._record_rate_limits(response)
             if not response.ok:
-                raise CloudinaryAPIError(f"Cloudinary upload failed with HTTP {response.status_code}")
+                message = _response_error_message(response, "request rejected")
+                raise CloudinaryAPIError(
+                    _redact_error(
+                        f"Cloudinary upload failed with HTTP {response.status_code}: {message}",
+                        self.config,
+                    ),
+                    status_code=response.status_code,
+                )
             payload = response.json()
             if not isinstance(payload, dict):
                 raise CloudinaryAPIError("Cloudinary upload returned invalid JSON")
             if payload.get("error"):
                 error = payload.get("error")
                 message = error.get("message") if isinstance(error, dict) else error
-                raise CloudinaryAPIError(f"Cloudinary upload rejected: {str(message)[:300]}")
+                raise CloudinaryAPIError(
+                    _redact_error(f"Cloudinary upload rejected: {str(message)[:300]}", self.config)
+                )
             if not payload.get("secure_url") or not payload.get("public_id"):
                 raise CloudinaryAPIError("Cloudinary upload returned no secure URL or public ID")
             return payload
