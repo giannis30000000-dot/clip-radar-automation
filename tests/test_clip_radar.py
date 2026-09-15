@@ -175,6 +175,13 @@ class ClipRadarTests(unittest.TestCase):
         self.assertTrue(caption_lines)
         self.assertTrue(all(len(line) <= 26 for line in caption_lines))
 
+    def test_subtitles_use_one_explicit_bottom_safe_zone_position(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "captions.srt"
+            write_srt([{"start": 0.0, "end": 1.0, "text": "one short caption"}], path)
+            content = path.read_text(encoding="utf-8")
+        self.assertIn(r"{\an2\pos(360,1060)}", content)
+
     def test_hook_is_short_and_is_not_a_second_subtitle_system(self):
         hook = build_hook("xQc", "Jean Paul gets IRL GO Postal delivery")
         self.assertLessEqual(len(hook), 48)

@@ -31,7 +31,7 @@ def _read_captions(path: Path) -> list[dict[str, Any]]:
             hours, minutes, rest = value.split(":")
             whole, millis = rest.split(",")
             return int(hours) * 3600 + int(minutes) * 60 + int(whole) + int(millis) / 1000
-        text = "\n".join(lines[2:]).strip()
+        text = re.sub(r"\{\\[^}]+\}", "", "\n".join(lines[2:]).strip())
         result.append({"start": seconds(match.group(1)), "end": seconds(match.group(2)), "text": text})
     return result
 
@@ -90,6 +90,12 @@ def inspect_final(path: Path, manifest_path: Path | None = None) -> dict[str, An
         "hook_caption_timing_distinct": all(item["start"] >= hook_active for item in captions),
         "caption_density": density <= 22.0,
         "transcription_confidence": bool(captions) and not low_confidence,
+        "subtitle_safe_position_configured": (
+            subtitles.get("positioning") == "explicit_ass_bottom_center"
+            and (subtitles.get("position") or {}).get("anchor") == "bottom_center"
+            and int((subtitles.get("position") or {}).get("x", -1)) == 360
+            and int((subtitles.get("position") or {}).get("y", -1)) == 1060
+        ),
     })
     try:
         visual = analyze_video(path)

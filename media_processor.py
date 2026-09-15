@@ -103,6 +103,10 @@ def write_srt(entries, path: Path):
             caption = _wrap_caption(entry.get("text", ""))
             if not caption:
                 continue
+            # Keep one subtitle system, but pin every transcript caption to a
+            # known bottom-center safe-zone anchor. Relying on implicit SRT
+            # placement caused captions to land in the upper matte.
+            caption = "{\\an2\\pos(360,1060)}" + caption
             handle.write(
                 f"{index}\n{srt_timestamp(entry['start'])} --> {srt_timestamp(entry['end'])}\n{caption}\n\n"
             )
@@ -211,6 +215,8 @@ def render_vertical(source: Path, output: Path, hook: str = "CLIP RADAR"):
             "max_lines": 2,
             "max_chars_per_line": 24,
             "safe_zone": {"left": 56, "right": 56, "bottom": 185, "top": 870},
+            "positioning": "explicit_ass_bottom_center",
+            "position": {"anchor": "bottom_center", "x": 360, "y": 1060},
             "entries": entries,
         },
         "framing": framing,
