@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from acquisition import AcquisitionError, acquire_candidate, candidate_clip_id
+from cloudinary_media_host import CloudinaryMediaHost
 from content_safety import check_third_party_content
 from dedupe import DedupeStore
 from media_processor import render_vertical
@@ -91,6 +92,7 @@ def run_live(
     publishing_dry_run = _env_bool("PUBLISHING_DRY_RUN")
     publishing_backend = configured_backend()
     publisher = None
+    media_host = None
     publication_ledger = None
     if publishing_enabled or publishing_dry_run:
         publisher = create_publisher()
@@ -99,6 +101,8 @@ def run_live(
         publication_ledger = PublicationLedger(
             Path(os.getenv("CLIP_RADAR_PUBLICATION_STATE_FILE", "state/publications.json"))
         )
+        if publishing_backend == "buffer":
+            media_host = CloudinaryMediaHost()
     now_candidates = scan_candidates()
     print_candidates(now_candidates)
     eligible, skipped = pick_eligible(now_candidates, limit=max_candidates)
@@ -125,6 +129,7 @@ def run_live(
         "publishing_dry_run": publishing_dry_run,
         "publishing_backend": publishing_backend,
         "publishing_plans": [],
+        "cloudinary_deliveries": [],
     }
     if publisher:
         summary["publishing"] = {
@@ -143,6 +148,10 @@ def run_live(
                 or (
                     publishing_dry_run
                     and publication_ledger.needs_publication_retry(clip_id)
+                )
+                or (
+                    media_host
+                    and publication_ledger.needs_media_delivery_retry(clip_id)
                 )
             )
         )
@@ -283,7 +292,32 @@ def run_live(
                     third_party_check=third_party_check["status"],
                     transformation_check=transformation_check["status"],
                 )
-                plan = publisher.build_plan(validated_clip, metadata)
+                _record_publication_state(
+                    publication_ledger,
+                    raw,
+                    "PUBLISH_ELIGIBLE",
+                    rights_basis=validated_clip.rights_basis,
+                    third_party_check=validated_clip.third_party_check,
+                    transformation_check=validated_clip.transformation_check,
+                )
+                media_delivery = None
+                if media_host:
+                    media_delivery = media_host.upload_final(final_path, clip_id, publication_ledger)
+                    attempt["cloudinary_delivery"] = media_delivery
+                    summary["cloudinary_deliveries"].append(media_delivery)
+                    print(
+                        f"cloudinary | VERIFIED | clip_id={clip_id} | public_id={media_delivery['public_id']} | "
+                        f"file_size={media_delivery['source_file_size']} | delivery=PUBLIC_HTTPS_MP4_VERIFIED"
+                    )
+                if publishing_backend == "buffer":
+                    plan = publisher.build_plan(
+                        validated_clip,
+                        metadata,
+                        media_url=(media_delivery or {}).get("public_url"),
+                        media_delivery=media_delivery,
+                    )
+                else:
+                    plan = publisher.build_plan(validated_clip, metadata)
                 publication_ledger.upsert_clip(
                     clip_id,
                     "PUBLISH_ELIGIBLE",
@@ -298,6 +332,7 @@ def run_live(
                     rights_basis=validated_clip.rights_basis,
                     third_party_check=validated_clip.third_party_check,
                     transformation_check=validated_clip.transformation_check,
+                    media_delivery=media_delivery,
                 )
                 summary["publishing_plans"].append(plan)
                 summary["publishing"]["plans"].append(plan)
@@ -305,6 +340,10 @@ def run_live(
                     result = publisher.publish(validated_clip, metadata, publication_ledger, plan=plan)
                     summary["publishing"]["results"].append(result)
                     attempt["publication"] = result
+                    if media_host:
+                        attempt["cloudinary_delivery"] = media_host.mark_buffer_result(
+                            clip_id, result, publication_ledger
+                        )
             if len(summary["outputs"]) >= max_outputs:
                 break
         except Exception as exc:
@@ -328,6 +367,20 @@ def run_live(
         })
     else:
         publishing_plan_path.unlink(missing_ok=True)
+    if media_host:
+        _write_summary(
+            output_dir / "cloudinary_delivery.json",
+            {
+                "schema_version": 1,
+                "provider": "cloudinary",
+                "deliveries": summary["cloudinary_deliveries"],
+                "configuration": media_host.config.safe_summary(),
+                "api_calls": media_host.api_calls,
+                "rate_limits": media_host.rate_limits,
+            },
+        )
+    else:
+        (output_dir / "cloudinary_delivery.json").unlink(missing_ok=True)
     _write_summary(output_dir / "run_summary.json", summary)
     return summary
 

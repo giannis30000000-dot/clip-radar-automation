@@ -1,0 +1,61 @@
+name: Clip Radar Cloudinary Temporary Media Cleanup
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Retain enough time for Buffer/platform ingestion, then clean expired bridge assets.
+    - cron: '37 3 * * *'
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: clip-radar-cloudinary-cleanup-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install --disable-pip-version-check -r requirements.txt
+      - name: Restore persistent clip and publication ledgers
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: clip-radar-dedupe-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            clip-radar-dedupe-${{ github.ref_name }}-
+      - name: Delete expired Cloudinary bridge assets
+        env:
+          CLIP_RADAR_PUBLICATION_STATE_FILE: state/publications.json
+          CLIP_RADAR_OUTPUT_DIR: output
+          CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
+          CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+          CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
+          CLOUDINARY_FOLDER: clipradar/buffer
+          CLOUDINARY_RETENTION_HOURS: '48'
+          CLOUDINARY_ABANDONED_RETENTION_HOURS: '24'
+          CLOUDINARY_MAX_CLEANUP_PER_RUN: '20'
+        run: python cloudinary_cleanup.py
+      - name: Save persistent clip and publication ledgers
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: clip-radar-dedupe-${{ github.ref_name }}-${{ github.run_id }}
+      - name: Upload Cloudinary cleanup audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clip-radar-cloudinary-cleanup-${{ github.run_id }}
+          path: output/cloudinary_cleanup_summary.json
+          if-no-files-found: warn

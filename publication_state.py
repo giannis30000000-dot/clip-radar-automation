@@ -52,6 +52,55 @@ class PublicationLedger:
     def get(self, clip_id: str) -> dict[str, Any] | None:
         return self._data.get("clips", {}).get(str(clip_id))
 
+    def iter_clips(self):
+        """Yield clip IDs and records for bounded maintenance jobs."""
+
+        return list((self._data.get("clips") or {}).items())
+
+    def update_media_delivery(self, clip_id: str, media_delivery: dict[str, Any]) -> dict[str, Any]:
+        """Persist sanitized media-host metadata without changing pipeline state."""
+
+        record = dict(self.get(clip_id) or {"clip_id": str(clip_id), "networks": {}})
+        record["media_delivery"] = dict(media_delivery)
+        record["clip_id"] = str(clip_id)
+        record["updated_at"] = datetime.now(timezone.utc).isoformat()
+        record.setdefault("networks", {})
+        record.setdefault("analytics", {
+            "views": None,
+            "likes": None,
+            "comments": None,
+            "shares": None,
+            "reach": None,
+            "watch_time": None,
+            "completion_rate": None,
+            "follows_generated": None,
+        })
+        self._data.setdefault("clips", {})[str(clip_id)] = record
+        self._write()
+        return record
+
+    def needs_media_delivery_retry(self, clip_id: str) -> bool:
+        """Retry a QC-passed clip that has no verified delivery asset."""
+
+        record = self.get(clip_id) or {}
+        media = record.get("media_delivery") or {}
+        if media.get("status") in {
+            "VERIFIED",
+            "READY_FOR_BUFFER",
+            "BUFFER_QUEUED",
+            "BUFFER_PUBLISHED",
+            "CLEANUP_PENDING",
+        }:
+            return False
+        if record.get("status") not in {"QC_PASSED", "PUBLISH_ELIGIBLE", "FAILED"}:
+            return False
+        if record.get("status") == "FAILED" and not any(
+            item.get("status") == "QC_PASSED"
+            for item in (record.get("state_history") or [])
+        ):
+            return False
+        return True
+
     def is_published(self, clip_id: str) -> bool:
         record = self.get(clip_id) or {}
         if record.get("status") in SUCCESS_STATES:

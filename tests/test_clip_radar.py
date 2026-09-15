@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from dedupe import DedupeStore
 from acquisition import AcquisitionError, AcquisitionResult, acquire_candidate
 from buffer_publisher import BufferConfig, BufferPublisher
+from cloudinary_media_host import CloudinaryConfig, CloudinaryMediaHost
 from content_safety import check_third_party_content
 import orchestrator
 from rights_gate import pick_eligible
@@ -309,6 +310,149 @@ class ClipRadarTests(unittest.TestCase):
         self.assertFalse(plan["live_request_sent"])
         self.assertEqual(plan["networks"]["instagram"]["input"]["metadata"]["instagram"]["type"], "reel")
         self.assertEqual(plan["networks"]["tiktok"]["input"]["channelId"], "tt-1")
+
+    def test_cloudinary_upload_verifies_and_reuses_final_delivery(self):
+        class FakeResponse:
+            ok = True
+            status_code = 200
+            url = "https://res.cloudinary.com/demo/video/upload/v1/clipradar/buffer/clip123.mp4"
+
+            def __init__(self, payload=None, headers=None, status_code=200):
+                self.payload = payload or {}
+                self.headers = headers or {"Content-Type": "video/mp4", "Content-Length": "4096"}
+                self.status_code = status_code
+                self.ok = 200 <= status_code < 400
+
+            def json(self):
+                return self.payload
+
+            def iter_content(self, chunk_size=4096):
+                yield b"\x00\x00\x00\x18ftypisom" + b"0" * 100
+
+            def close(self):
+                return None
+
+        class FakeSession:
+            def __init__(self):
+                self.posts = []
+                self.heads = 0
+                self.gets = 0
+
+            def post(self, url, **kwargs):
+                self.posts.append((url, kwargs))
+                if url.endswith("/video/upload"):
+                    return FakeResponse(
+                        {
+                            "secure_url": "https://res.cloudinary.com/demo/video/upload/v1/clipradar/buffer/clip123.mp4",
+                            "public_id": "clipradar/buffer/clip123",
+                            "bytes": 9,
+                            "duration": 3.0,
+                            "width": 720,
+                            "height": 1280,
+                            "format": "mp4",
+                            "resource_type": "video",
+                        }
+                    )
+                return FakeResponse({"result": "ok"})
+
+            def head(self, url, **kwargs):
+                self.heads += 1
+                return FakeResponse()
+
+            def get(self, url, **kwargs):
+                self.gets += 1
+                response = FakeResponse()
+                response.status_code = 206
+                response.ok = True
+                return response
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            final = root / "clip.mp4"
+            final.write_bytes(b"final mp4")
+            ledger = PublicationLedger(root / "publications.json")
+            session = FakeSession()
+            host = CloudinaryMediaHost(
+                config=CloudinaryConfig(
+                    cloud_name="demo",
+                    api_key="key",
+                    api_secret="secret",
+                    folder="clipradar/buffer",
+                    retention_hours=48,
+                    abandoned_retention_hours=24,
+                    max_upload_bytes=1000,
+                    max_active_objects=8,
+                    max_cleanup_per_run=20,
+                ),
+                session=session,
+                clock=lambda: datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc),
+            )
+            first = host.upload_final(final, "clip123", ledger)
+            second = host.upload_final(final, "clip123", ledger)
+            saved = json.loads((root / "publications.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(first["public_id"], "clipradar/buffer/clip123")
+        self.assertEqual(first["status"], "READY_FOR_BUFFER")
+        self.assertEqual(first["verification"]["status"], "PUBLIC_HTTPS_MP4_VERIFIED")
+        self.assertEqual(second["public_url"], first["public_url"])
+        self.assertEqual(len([item for item in session.posts if item[0].endswith("/video/upload")]), 1)
+        self.assertNotIn("secret", json.dumps(saved))
+
+    def test_cloudinary_cleanup_skips_queued_assets_and_deletes_expired_safe_asset(self):
+        class FakeResponse:
+            ok = True
+            status_code = 200
+            headers = {}
+
+            def json(self):
+                return {"result": "ok"}
+
+        class FakeSession:
+            def __init__(self):
+                self.urls = []
+
+            def post(self, url, **kwargs):
+                self.urls.append(url)
+                return FakeResponse()
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ledger = PublicationLedger(root / "publications.json")
+            old = "2026-09-10T12:00:00+00:00"
+            ledger.upsert_clip("expired", "PUBLISHED")
+            ledger.update_media_delivery(
+                "expired",
+                {"provider": "cloudinary", "status": "BUFFER_PUBLISHED", "public_id": "clipradar/buffer/expired", "cleanup_after": old},
+            )
+            ledger.upsert_clip("queued", "QUEUED")
+            ledger.update_network("queued", "instagram", "QUEUED")
+            ledger.update_media_delivery(
+                "queued",
+                {"provider": "cloudinary", "status": "BUFFER_QUEUED", "public_id": "clipradar/buffer/queued", "cleanup_after": old},
+            )
+            session = FakeSession()
+            host = CloudinaryMediaHost(
+                config=CloudinaryConfig(
+                    cloud_name="demo",
+                    api_key="key",
+                    api_secret="secret",
+                    folder="clipradar/buffer",
+                    retention_hours=48,
+                    abandoned_retention_hours=24,
+                    max_upload_bytes=1000,
+                    max_active_objects=8,
+                    max_cleanup_per_run=20,
+                ),
+                session=session,
+                clock=lambda: datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc),
+            )
+            result = host.cleanup_expired(ledger)
+
+            self.assertEqual(result["processed"], 1)
+            self.assertEqual(result["results"][0]["clip_id"], "expired")
+            self.assertEqual(ledger.get("expired")["media_delivery"]["status"], "DELETED")
+            self.assertEqual(ledger.get("queued")["media_delivery"]["status"], "BUFFER_QUEUED")
+            self.assertEqual(len(session.urls), 1)
 
 
 if __name__ == "__main__":

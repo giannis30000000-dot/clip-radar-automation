@@ -54,6 +54,14 @@ jobs:
           BUFFER_CHANNEL_CONFIG: state/buffer_channels.json
           BUFFER_BRAND_NAME: Clip Radar
           BUFFER_NETWORKS: 'tiktok,instagram'
+          CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
+          CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+          CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
+          CLOUDINARY_FOLDER: clipradar/buffer
+          CLOUDINARY_RETENTION_HOURS: '48'
+          CLOUDINARY_ABANDONED_RETENTION_HOURS: '24'
+          CLOUDINARY_MAX_UPLOAD_BYTES: '78643200'
+          CLOUDINARY_MAX_ACTIVE_OBJECTS: '8'
           # Buffer request mutations. Live publishing requires a separate deliberate
           # workflow/configuration change after this plan is inspected.
           PUBLISHING_ENABLED: 'false'
@@ -98,6 +106,13 @@ jobs:
         with:
           name: clip-radar-buffer-dry-run-${{ github.run_id }}
           path: output/publishing_plan.json
+          if-no-files-found: warn
+      - name: Upload Cloudinary delivery report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clip-radar-cloudinary-delivery-${{ github.run_id }}
+          path: output/cloudinary_delivery.json
           if-no-files-found: warn
       - name: Upload publication state audit
         if: always()

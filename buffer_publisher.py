@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 import requests
+from urllib.parse import urlparse
 
 from publication_state import PublicationLedger
 from publication_types import ValidatedClip
@@ -243,6 +244,8 @@ class BufferPublisher:
         clip: ValidatedClip,
         metadata: Mapping[str, Any],
         slot: datetime | None = None,
+        media_url: str | None = None,
+        media_delivery: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         self.validate_input(clip)
         discovery = self.discover_channels(force=_env_bool("BUFFER_REFRESH_CHANNELS"))
@@ -250,7 +253,7 @@ class BufferPublisher:
             slot = next_production_slot(now=self._last_planned_slot, timezone_name=self.config.timezone_name)
         self._last_planned_slot = slot
         fields = _candidate_fields(clip.candidate)
-        media_url = self.config.media_url or "<PUBLIC_BUFFER_MEDIA_URL_REQUIRED>"
+        media_url = media_url or self.config.media_url or "<PUBLIC_BUFFER_MEDIA_URL_REQUIRED>"
         requests_by_network: dict[str, dict[str, Any]] = {}
         due_at = slot.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
         for network in self.config.networks:
@@ -308,6 +311,7 @@ class BufferPublisher:
             "disabled_networks": ["youtube"] if "youtube" not in self.config.networks else [],
             "all_generated_metadata": dict(metadata),
             "media": {
+                **_safe_media_delivery(media_delivery),
                 "required": True,
                 "public_url": media_url,
                 "source_file": str(clip.final_path),
@@ -332,9 +336,10 @@ class BufferPublisher:
             raise PublicationBlocked("dry-run mode cannot send live Buffer requests")
         if self.config.missing_credentials():
             raise PublicationBlocked("missing Buffer configuration: BUFFER_API_KEY")
-        if not self.config.media_url:
-            raise PublicationBlocked("live Buffer publishing requires BUFFER_MEDIA_URL, a stable public MP4 URL")
         plan = plan or self.build_plan(clip, metadata)
+        media_url = str((plan.get("media") or {}).get("public_url") or self.config.media_url or "")
+        if not _is_public_media_url(media_url):
+            raise PublicationBlocked("live Buffer publishing requires a stable public HTTPS MP4 URL")
         clip_id = plan["candidate"]["clip_id"]
         pending = {
             network: item
@@ -480,6 +485,36 @@ class BufferPublisher:
         if all(self.config.brand_name.lower() in item["name"].lower() for item in selected.values()):
             return "unique_clip_radar_brand_name_match"
         return "unique_channel_per_required_service"
+
+
+def _is_public_media_url(value: str) -> bool:
+    parsed = urlparse(value)
+    return parsed.scheme == "https" and bool(parsed.netloc) and not value.startswith("<")
+
+
+def _safe_media_delivery(delivery: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not delivery:
+        return {}
+    allowed = {
+        "provider",
+        "status",
+        "public_id",
+        "public_url",
+        "secure_url",
+        "source_sha256",
+        "source_file_size",
+        "hosted_bytes",
+        "duration",
+        "width",
+        "height",
+        "format",
+        "resource_type",
+        "uploaded_at",
+        "cleanup_after",
+        "verified_at",
+        "verification",
+    }
+    return {key: delivery[key] for key in allowed if key in delivery}
 
 
 def _candidate_fields(candidate: Mapping[str, Any]) -> dict[str, Any]:

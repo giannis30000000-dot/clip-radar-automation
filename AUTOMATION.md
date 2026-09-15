@@ -2,15 +2,16 @@
 
 The production path is now:
 
-`Twitch Helix discovery -> viral ranking -> sharing_whitelist.json -> public Twitch clip acquisition -> source validation -> local Whisper transcription -> 9:16 edit -> QC -> rights/content safety -> gated Buffer plan -> artifacts`
+`Twitch Helix discovery -> viral ranking -> sharing_whitelist.json -> public Twitch clip acquisition -> source validation -> local Whisper transcription -> 9:16 edit -> QC -> rights/content safety -> PUBLISH_ELIGIBLE -> Cloudinary temporary delivery -> gated Buffer plan -> artifacts`
 
-`orchestrator.py` writes the original landscape MP4 to
-`output/sources/`, the edited vertical MP4 to `output/final/`, and a structured
-`output/run_summary.json`. With `PUBLISHING_ENABLED=false` and
-`PUBLISHING_DRY_RUN=true`, it also writes `output/publishing_plan.json`. The
-GitHub Action uploads the source, final, run summary, Buffer plan, and state
-audit as separate artifacts for inspection. Dry-run performs read-only Buffer
-account/channel discovery and does not create posts.
+`orchestrator.py` writes the original landscape MP4 to `output/sources/`, the
+edited vertical MP4 to `output/final/`, and structured run, delivery, and
+publication reports. With `PUBLISHING_ENABLED=false` and
+`PUBLISHING_DRY_RUN=true`, the cloud test uploads only the final vertical MP4
+to Cloudinary, verifies its public HTTPS delivery, and creates a sanitized
+Buffer plan without creating posts. The GitHub Action uploads the source,
+final, run summary, Cloudinary delivery report, Buffer plan, and state audit as
+separate artifacts for inspection.
 
 ## Acquisition and rights
 
@@ -44,6 +45,19 @@ the transformation check requires the editorial hook, pacing policy, reframed
 composition, transcript subtitles, branding, and attribution profile. Unknown
 or uncertain rights never publish.
 
+## Cloudinary delivery, cleanup, and Buffer dry run
+
+`cloudinary_media_host.py` is the temporary delivery adapter between GitHub
+Actions and Buffer. It signs a video upload with the Cloudinary API secrets,
+uses deterministic IDs under `clipradar/buffer/`, refuses oversized files or
+too many active bridge objects, verifies the returned HTTPS URL with an MP4
+byte-range probe, and reuses a verified upload for the same final-file hash.
+Only the final vertical MP4 is hosted; the source landscape file remains a
+GitHub artifact. `cloudinary-cleanup.yml` runs daily and deletes only expired
+assets that have no queued or in-progress network state, with bounded work per
+run. Successful or queued Buffer results retain the object for the configured
+retention period; abandoned uploads use the shorter cleanup window.
+
 ## Buffer dry run and production schedule
 
 `buffer_publisher.py` is the active backend; `metricool_publisher.py` remains an
@@ -61,13 +75,14 @@ the strongest currently available eligible candidate and never forces category
 diversity. YouTube remains disabled until the account is recovered and its
 Buffer channel is connected.
 
-Buffer's API does not upload local files. Live mode therefore requires
-`BUFFER_MEDIA_URL`, a stable public HTTPS MP4 URL that remains reachable until
-the scheduled post publishes. A GitHub Actions artifact URL is not suitable.
+Buffer receives the verified Cloudinary HTTPS URL in both the Instagram Reel
+and TikTok `createPost` request plans. YouTube remains disabled.
 
 ## Required Action secrets
 
-Configure `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, and `BUFFER_API_KEY` as
-GitHub Actions secrets. The Twitch credentials are used only for Helix
-discovery; the Buffer key is sent only as a Bearer token to `api.buffer.com`.
-Secret values are never printed, written to artifacts, or committed.
+Configure `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `BUFFER_API_KEY`,
+`CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` as
+GitHub Actions secrets. Twitch credentials are used only for Helix discovery;
+the Buffer key is sent only as a Bearer token to `api.buffer.com`; Cloudinary
+credentials are used only by the signed upload/destroy adapter. Secret values
+are never printed, written to artifacts, or committed.
