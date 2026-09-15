@@ -1,0 +1,134 @@
+name: Clip Radar Controlled Buffer Publication
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_live:
+        description: Explicitly authorize one live Instagram Reel and TikTok publication
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: clip-radar-controlled-buffer-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  reject-without-confirmation:
+    if: ${{ inputs.confirm_live != true }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require explicit live confirmation
+        run: |
+          echo "Live publication was not authorized. Re-run this workflow with confirm_live=true."
+          exit 1
+
+  publish-one:
+    if: ${{ inputs.confirm_live == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+      TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+      BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+      STREAMERS: xqc,kaicenat,jynxzi,caseoh_,stableronaldo,zackrawrr,sodapoppin,lacy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install --disable-pip-version-check -r requirements.txt
+      - name: Install ffmpeg for source validation and editing
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Run regression tests
+        run: python -m unittest discover -v
+      - name: Restore persistent clip and publication ledgers
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: clip-radar-dedupe-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            clip-radar-dedupe-${{ github.ref_name }}-
+      - name: Set controlled schedule seven minutes from now
+        run: echo "BUFFER_SCHEDULE_AT=$(date -u -d '+7 minutes' '+%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
+      - name: Run one controlled live Buffer publication
+        env:
+          CLIP_RADAR_STATE_FILE: state/processed_clips.json
+          CLIP_RADAR_PUBLICATION_STATE_FILE: state/publications.json
+          CLIP_RADAR_OUTPUT_DIR: output
+          PUBLISHER_BACKEND: buffer
+          BUFFER_CHANNEL_CONFIG: state/buffer_channels.json
+          BUFFER_BRAND_NAME: Clip Radar
+          BUFFER_NETWORKS: 'tiktok,instagram'
+          CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
+          CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+          CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
+          CLOUDINARY_FOLDER: clipradar/buffer
+          CLOUDINARY_RETENTION_HOURS: '48'
+          CLOUDINARY_ABANDONED_RETENTION_HOURS: '24'
+          CLOUDINARY_MAX_UPLOAD_BYTES: '78643200'
+          CLOUDINARY_MAX_ACTIVE_OBJECTS: '8'
+          PUBLISHING_ENABLED: 'true'
+          PUBLISHING_DRY_RUN: 'false'
+          ENABLE_YOUTUBE_PUBLISHING: 'false'
+          PRODUCTION_TIMEZONE: 'Europe/Athens'
+          PRODUCTION_SLOTS: '12:00,15:30,19:00,22:00'
+          MAX_OUTPUTS: '1'
+          MAX_CANDIDATES: '20'
+          WHISPER_MODEL: tiny
+        run: python orchestrator.py
+      - name: Save persistent clip and publication ledgers
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: clip-radar-dedupe-${{ github.ref_name }}-${{ github.run_id }}
+      - name: Upload original acquired landscape MP4
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clip-radar-live-source-${{ github.run_id }}
+          path: output/sources/*_landscape.mp4
+          if-no-files-found: warn
+      - name: Upload final edited vertical MP4
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clip-radar-live-final-${{ github.run_id }}
+          path: output/final/*_clipradar_vertical.mp4
+          if-no-files-found: warn
+      - name: Upload run summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clip-radar-live-run-${{ github.run_id }}
+          path: output/run_summary.json
+          if-no-files-found: warn
+      - name: Upload live Buffer publication plan and result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clip-radar-live-buffer-${{ github.run_id }}
+          path: output/publishing_plan.json
+          if-no-files-found: warn
+      - name: Upload Cloudinary delivery report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clip-radar-live-cloudinary-${{ github.run_id }}
+          path: output/cloudinary_delivery.json
+          if-no-files-found: warn
+      - name: Upload publication state audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clip-radar-live-publication-state-${{ github.run_id }}
+          path: state/publications.json
+          if-no-files-found: warn

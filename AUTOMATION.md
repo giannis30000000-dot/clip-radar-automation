@@ -48,15 +48,16 @@ or uncertain rights never publish.
 ## Cloudinary delivery, cleanup, and Buffer dry run
 
 `cloudinary_media_host.py` is the temporary delivery adapter between GitHub
-Actions and Buffer. It signs a video upload with the Cloudinary API secrets,
-uses deterministic IDs under `clipradar/buffer/`, refuses oversized files or
-too many active bridge objects, verifies the returned HTTPS URL with an MP4
-byte-range probe, and reuses a verified upload for the same final-file hash.
-Only the final vertical MP4 is hosted; the source landscape file remains a
-GitHub artifact. `cloudinary-cleanup.yml` runs daily and deletes only expired
-assets that have no queued or in-progress network state, with bounded work per
-run. Successful or queued Buffer results retain the object for the configured
-retention period; abandoned uploads use the shorter cleanup window.
+Actions and Buffer. It authenticates a video upload server-side with the
+Cloudinary API secrets, uses deterministic IDs under `clipradar/buffer/`,
+refuses oversized files or too many active bridge objects, verifies the
+returned HTTPS URL with an MP4 byte-range probe, and reuses a verified upload
+for the same final-file hash. Only the final vertical MP4 is hosted; the
+source landscape file remains a GitHub artifact. `cloudinary-cleanup.yml` runs
+daily and deletes only expired assets that have no queued or in-progress
+network state, with bounded work per run. Successful or queued Buffer results
+retain the object for the configured retention period; abandoned uploads use
+the shorter cleanup window.
 
 ## Buffer dry run and production schedule
 
@@ -77,6 +78,12 @@ Buffer channel is connected.
 
 Buffer receives the verified Cloudinary HTTPS URL in both the Instagram Reel
 and TikTok `createPost` request plans. YouTube remains disabled.
+
+`controlled-buffer-publication.yml` is manual-only and requires the explicit
+`confirm_live=true` dispatch input. It is the only workflow configured to set
+`PUBLISHING_ENABLED=true`; it schedules one fresh, non-duplicate candidate
+seven minutes ahead on Instagram and TikTok, with YouTube disabled. The
+hourly `scan.yml` workflow remains permanently in Buffer dry-run mode.
 
 ## Required Action secrets
 
