@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "description": "Sanitized publication history used to prevent reposts across cloud runners. No credentials are stored.",
+  "publications": [
+    {
+      "record_key": "buffer-6aa9a5cc69943a3a7bcba958",
+      "post_id": "6aa9a5cc69943a3a7bcba958",
+      "clip_id": "KawaiiInterestingSnoodBlargNaut-jM2zTV9rqCc_xV36",
+      "broadcaster": "xQc",
+      "title": "Jean Paul gets IRL GO Postal delivery",
+      "service": "tiktok",
+      "status": "SENT",
+      "published_at": "2026-09-15T20:13:16Z"
+    },
+    {
+      "record_key": "buffer-6aa9a639ead2fcea2acf128d",
+      "post_id": "6aa9a639ead2fcea2acf128d",
+      "clip_id": "ApatheticEnjoyablePonyRickroll-aSqDBRpTWALl5Ty5",
+      "broadcaster": "xQc",
+      "title": "4 diseases o7",
+      "service": "tiktok",
+      "status": "SENT",
+      "published_at": "2026-09-15T20:13:16Z"
+    },
+    {
+      "record_key": "buffer-6aa9a69c561b66f2992a1ed5",
+      "post_id": "6aa9a69c561b66f2992a1ed5",
+      "clip_id": "ShortBashfulClipzNerfRedBlaster-I81_asrkF0qq7Hwe",
+      "broadcaster": "xQc",
+      "title": "XQC gets a package from Go-Postal IRL",
+      "service": "tiktok",
+      "status": "SENT",
+      "published_at": "2026-09-15T20:13:16Z"
+    },
+    {
+      "record_key": "buffer-6aa9a6caead2fcea2acf1e77",
+      "post_id": "6aa9a6caead2fcea2acf1e77",
+      "clip_id": "ObliviousFitLardDuDudu-vLyJ-lvko7SEBiNe",
+      "broadcaster": "xQc",
+      "title": "lmao",
+      "service": "tiktok",
+      "status": "SENT",
+      "published_at": "2026-09-15T20:13:16Z"
+    },
+    {
+      "record_key": "buffer-history-jean-paul-irl-delivery",
+      "broadcaster": "xQc",
+      "title": "Jean Paul just got an IRL delivery and xQc couldn't believe it",
+      "text": "Jean Paul just got an IRL delivery and xQc couldn't believe it #xQc #JeanPaul #GTARP #TwitchClips #StreamerClips",
+      "service": "instagram+tiktok",
+      "status": "SENT",
+      "published_at": "2026-09-15T18:01:00Z",
+      "note": "Imported from the read-only Buffer audit; no clip ID was present in the post text."
+    }
+  ]
+}

@@ -2,7 +2,7 @@
 
 The production path is now:
 
-`Twitch Helix discovery -> viral ranking -> sharing_whitelist.json -> public Twitch clip acquisition -> source validation -> local Whisper transcription -> 9:16 edit -> QC -> rights/content safety -> PUBLISH_ELIGIBLE -> Cloudinary temporary delivery -> gated Buffer plan -> artifacts`
+`Twitch Helix discovery -> viral ranking -> sharing_whitelist.json -> multi-layer dedupe -> public Twitch clip acquisition -> source validation -> local Whisper transcription -> content-aware 9:16 edit -> strict QC -> rights/content safety -> PUBLISH_ELIGIBLE -> Cloudinary temporary delivery -> gated Buffer plan -> artifacts`
 
 `orchestrator.py` writes the original landscape MP4 to `output/sources/`, the
 edited vertical MP4 to `output/final/`, and structured run, delivery, and
@@ -28,10 +28,16 @@ without changing the ranking or QC stages.
 
 ## Dedupe and publishing safety
 
-`state/processed_clips.json` is keyed by immutable Twitch clip ID. The Action
-restores and saves the ledger using a unique per-run cache key with a branch
-prefix, so later hourly runs skip clips already prepared or published. The
-cache is durable under GitHub's cache retention policy; the ledger never
+`state/processed_clips.json` is a versioned ledger. It checks immutable Twitch
+clip ID first, then broadcaster/VOD/timestamp overlap, then sanitized
+publication-history aliases, and finally decoded source/final audio and visual
+fingerprints. It is keyed by media identity, not filenames. The Action restores
+and saves the ledger using a unique per-run cache key with a branch prefix, so
+later hourly runs skip clips already prepared or published. The seed file
+`historical_publications.json` includes the four accidental TikTok posts and
+the earlier Jean Paul delivery publication alias. `buffer-audit.yml` imports
+later read-only Buffer history into the same ledger without network mutations.
+The cache is durable under GitHub's cache retention policy; the ledger never
 silently forgets an ID. `state/publications.json` is a separate publication
 ledger with independent per-network state and analytics-ready fields. Its
 state machine is:
@@ -44,6 +50,30 @@ routes obvious movie/TV/music/broadcast/rebroadcast signals to review, and
 the transformation check requires the editorial hook, pacing policy, reframed
 composition, transcript subtitles, branding, and attribution profile. Unknown
 or uncertain rights never publish.
+
+## Editorial quality hardening
+
+`media_processor.py` transcribes once and emits one FFmpeg/libass transcript
+subtitle layer. The short factual hook is a separate title-card drawtext
+element, disabled whenever a transcript caption is active; it is never added
+to the SRT. Captions are confidence-filtered, timed, wrapped to at most two
+mobile-readable lines, and kept inside the configured safe margins. The edit
+window is derived from speech setup/action/payoff rather than a fixed blind
+duration.
+
+`framing.py` samples decoded frames for face presence, motion, edge activity,
+and dark borders. Landscape sources use a full-frame fit over a blurred 9:16
+background so facecam and gameplay remain visible; there is no blind center
+crop. Each render writes a `.render.json` manifest. `quality_control.py`
+checks the manifest, subtitle count/timing/density/confidence, canvas/audio,
+visual variation, black-bar risk, framing strategy, and hook separation. A
+failed or low-confidence check is `REVIEW_REQUIRED`, not publishable.
+
+The manual-only `quality-validation.yml` workflow runs a fresh broad scan with
+`PUBLISHING_ENABLED=false`, requires three distinct real outputs, extracts
+beginning/middle/payoff/subtitle-heavy frames, and uploads sources, finals,
+manifests, QC reports, and inspection frames. It does not configure Buffer or
+Cloudinary credentials and cannot create a post.
 
 ## Cloudinary delivery, cleanup, and Buffer dry run
 

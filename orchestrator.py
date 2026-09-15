@@ -16,14 +16,15 @@ from typing import Any
 from acquisition import AcquisitionError, acquire_candidate, candidate_clip_id
 from cloudinary_media_host import CloudinaryAPIError, CloudinaryMediaHost, MediaDeliveryBlocked
 from content_safety import check_third_party_content
-from dedupe import DedupeStore
+from dedupe import DedupeStore, source_moment
+from fingerprint import video_fingerprint
 from media_processor import render_vertical
 from pipeline import Candidate, eligible_for_edit
-from publish_plan import build_metadata
+from publish_plan import build_hook, build_metadata
 from publication_state import PublicationLedger
 from publication_types import ValidatedClip
 from publisher_factory import configured_backend, create_publisher
-from quality_control import validate_final
+from quality_control import inspect_final, validate_final
 from rights_gate import pick_eligible, rights_evidence
 from scanner import print_candidates, scan_candidates
 from transformation_check import check_transformation
@@ -59,6 +60,14 @@ def _is_fatal_media_delivery_error(error: Exception) -> bool:
         message = str(error).lower()
         return "missing cloudinary configuration" in message or "active-object safety limit" in message
     return False
+
+
+def _fingerprint_if_real(path: Path) -> dict[str, Any] | None:
+    """Do not make unit-test placeholders look like real media."""
+
+    if not path.exists() or path.stat().st_size < 50_000:
+        return None
+    return video_fingerprint(path)
 
 
 def _record_publication_state(
@@ -141,6 +150,10 @@ def run_live(
         "publishing_backend": publishing_backend,
         "publishing_plans": [],
         "cloudinary_deliveries": [],
+        "dedupe": {
+            "layers": ["exact_clip_id", "source_moment_identity", "publication_history_alias", "perceptual_source_and_final_fingerprint"],
+            "history_seed": "historical_publications.json",
+        },
     }
     if publisher:
         summary["publishing"] = {
@@ -169,6 +182,11 @@ def run_live(
         if store.contains(clip_id) and not retry_failed_publication:
             print(f"dedupe | SKIP | {clip_id} | already_prepared_or_published")
             summary["attempts"].append({"clip_id": clip_id, "status": "DEDUPED"})
+            continue
+        metadata_duplicate = store.find_duplicate(raw, ignore_exact=retry_failed_publication)
+        if metadata_duplicate and metadata_duplicate.get("clip_id") != clip_id:
+            print(f"dedupe | SKIP | {clip_id} | {metadata_duplicate['reason']} | existing={metadata_duplicate.get('clip_id')}")
+            summary["attempts"].append({"clip_id": clip_id, "status": "DUPLICATE", "duplicate": metadata_duplicate})
             continue
         _record_publication_state(publication_ledger, raw, "DISCOVERED")
         _record_publication_state(publication_ledger, raw, "ELIGIBLE")
@@ -221,12 +239,24 @@ def run_live(
                 f"resolution={acquired.resolution} | file_size={acquired.file_size} | "
                 "validation=valid_video_and_audio_landscape_mp4"
             )
+            source_fingerprint = _fingerprint_if_real(acquired.path)
+            media_duplicate = store.find_duplicate(
+                raw,
+                source_fingerprint=source_fingerprint,
+                ignore_exact=True,
+            )
+            if media_duplicate and media_duplicate.get("clip_id") != clip_id:
+                acquired.path.unlink(missing_ok=True)
+                attempt.update({"status": "DUPLICATE", "duplicate": media_duplicate})
+                summary["attempts"].append(attempt)
+                print(f"dedupe | SKIP | {clip_id} | {media_duplicate['reason']} | existing={media_duplicate.get('clip_id')}")
+                continue
             final_dir.mkdir(parents=True, exist_ok=True)
             final_path = final_dir / f"{clip_id}_clipradar_vertical.mp4"
             caption_entries = render_vertical(
                 acquired.path,
                 final_path,
-                hook=f"{candidate.streamer}: {candidate.title}"[:55],
+                hook=build_hook(candidate.streamer, candidate.title),
             )
             _record_publication_state(
                 publication_ledger,
@@ -234,10 +264,34 @@ def run_live(
                 "RENDERED",
                 final_output_identifier=str(final_path),
             )
-            ok, reason = validate_final(final_path)
+            manifest_path = final_path.with_suffix(".render.json")
+            if final_path.exists() and final_path.stat().st_size >= 50_000:
+                quality_report = inspect_final(final_path, manifest_path)
+                ok, reason = quality_report["status"] == "QUALITY_CHECK_PASSED", quality_report["reason"]
+            else:
+                # Compatibility path for callers that replace render/QC with test doubles.
+                ok, reason = validate_final(final_path, manifest_path)
+                quality_report = {"schema_version": 2, "status": "QUALITY_CHECK_PASSED" if ok else "REVIEW_REQUIRED", "reason": reason, "test_double": True}
+            _write_summary(output_dir / "reports" / f"{clip_id}_quality.json", quality_report)
             if not ok:
                 final_path.unlink(missing_ok=True)
+                manifest_path.unlink(missing_ok=True)
+                final_path.with_suffix(".srt").unlink(missing_ok=True)
                 raise AcquisitionError(f"final QC failed: {reason}")
+            final_fingerprint = _fingerprint_if_real(final_path)
+            final_duplicate = store.find_duplicate(
+                raw,
+                final_fingerprint=final_fingerprint,
+                ignore_exact=True,
+            )
+            if final_duplicate and final_duplicate.get("clip_id") != clip_id:
+                final_path.unlink(missing_ok=True)
+                manifest_path.unlink(missing_ok=True)
+                final_path.with_suffix(".srt").unlink(missing_ok=True)
+                attempt.update({"status": "DUPLICATE", "duplicate": final_duplicate})
+                summary["attempts"].append(attempt)
+                print(f"dedupe | SKIP | {clip_id} | {final_duplicate['reason']} | existing={final_duplicate.get('clip_id')}")
+                continue
             metadata = build_metadata(
                 candidate.streamer,
                 candidate.title,
@@ -246,12 +300,14 @@ def run_live(
                 transcript_entries=caption_entries,
             )
             third_party_check = check_third_party_content(raw, caption_entries)
-            transformation_check = check_transformation(raw, final_path, caption_entries, metadata)
+            transformation_check = check_transformation(raw, final_path, caption_entries, metadata, quality_report)
+            attempt["rights"] = rights_evidence(raw)
             attempt.update(
                 {
                     "status": "READY",
                     "final": str(final_path),
                     "final_validation": reason,
+                    "quality_report": quality_report,
                     "metadata": metadata,
                     "third_party_check": third_party_check,
                     "transformation_check": transformation_check,
@@ -268,6 +324,8 @@ def run_live(
                     transformation_check=transformation_check,
                 )
                 final_path.unlink(missing_ok=True)
+                manifest_path.unlink(missing_ok=True)
+                final_path.with_suffix(".srt").unlink(missing_ok=True)
                 summary["attempts"].append(attempt)
                 print(f"safety | REVIEW_REQUIRED | clip_id={clip_id} | third_party={third_party_check['status']} | transformation={transformation_check['status']}")
                 continue
@@ -278,6 +336,9 @@ def run_live(
                 source=str(acquired.path),
                 final=str(final_path),
                 viral_score=candidate.score,
+                source_moment=source_moment(raw),
+                source_fingerprint=source_fingerprint,
+                final_fingerprint=final_fingerprint,
             )
             _record_publication_state(
                 publication_ledger,

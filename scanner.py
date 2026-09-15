@@ -83,8 +83,10 @@ def normalized_title(title):
     return re.sub(r"[^a-z0-9 ]+", "", (title or "").lower()).strip()
 
 
-def scan_candidates(now=None, lookback_hours=24):
+def scan_candidates(now=None, lookback_hours=None):
     now = now or datetime.now(timezone.utc)
+    if lookback_hours is None:
+        lookback_hours = float(os.getenv("CLIP_RADAR_LOOKBACK_HOURS", "24"))
     started=now-timedelta(hours=lookback_hours)
     token=get_app_token()
     users=get_user_ids(token, STREAMERS)
@@ -115,7 +117,7 @@ def scan_candidates(now=None, lookback_hours=24):
         key=(c["streamer"].lower(), normalized_title(c.get("title")))
         if key in seen: continue
         seen.add(key); final.append(c)
-        if len(final)>=20: break
+        if len(final) >= int(os.getenv("MAX_RANKED_CANDIDATES", "20")): break
 
     return final
 

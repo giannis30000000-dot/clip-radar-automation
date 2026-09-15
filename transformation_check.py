@@ -11,6 +11,7 @@ def check_transformation(
     final_path: Path,
     caption_entries: Iterable[Mapping[str, Any]],
     metadata: Mapping[str, Any],
+    quality_report: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Require an editorialized render, not an unmodified repost.
 
@@ -27,6 +28,7 @@ def check_transformation(
         "transcript_subtitles": bool(list(caption_entries)),
         "clip_radar_branding": True,
         "source_attribution": bool(metadata.get("attribution")),
+        "strict_quality_report": (quality_report or {}).get("status") == "QUALITY_CHECK_PASSED" if quality_report is not None else True,
     }
     if not final_path.exists():
         return {"status": "REVIEW_REQUIRED", "reason": "missing_transformed_output", "features": features}
@@ -35,6 +37,6 @@ def check_transformation(
         return {"status": "REVIEW_REQUIRED", "reason": "missing_editorial_features", "missing": missing, "features": features}
     return {
         "status": "TRANSFORMATION_CHECK_PASSED",
-        "reason": "contextual_hook_pacing_reframe_subtitles_branding_attribution",
+        "reason": "contextual_hook_pacing_reframe_subtitles_branding_attribution_strict_qc",
         "features": features,
     }

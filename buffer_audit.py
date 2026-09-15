@@ -175,6 +175,11 @@ def audit(output_path: Path | None = None, lookback_minutes: int | None = None) 
         "post_count": len(posts),
         "credential_names": ["BUFFER_API_KEY"],
     }
+    state_file = os.getenv("CLIP_RADAR_STATE_FILE")
+    if state_file:
+        from dedupe import DedupeStore
+
+        result["history_import"] = DedupeStore(Path(state_file)).import_publication_history(posts)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return result

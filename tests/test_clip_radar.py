@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
-from dedupe import DedupeStore
+from dedupe import DedupeStore, same_source_moment, source_moment
 from acquisition import AcquisitionError, AcquisitionResult, acquire_candidate
 from buffer_publisher import BufferConfig, BufferPublisher
 from buffer_reconcile import reconcile
@@ -19,7 +19,8 @@ from scanner import total_score
 from media_processor import write_srt
 from metricool_publisher import MetricoolConfig, MetricoolPublisher, PublicationBlocked, ValidatedClip
 from publication_state import PublicationLedger
-from publish_plan import build_metadata
+from publish_plan import build_hook, build_metadata
+from fingerprint import fingerprint_similarity
 from schedule_slots import next_production_slot
 
 
@@ -44,6 +45,54 @@ class ClipRadarTests(unittest.TestCase):
             self.assertTrue(DedupeStore(path).contains("abc123"))
             payload = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(payload["clips"]["abc123"]["status"], "prepared")
+
+    def test_dedupe_rejects_same_vod_moment_with_a_different_clip_id(self):
+        first = {
+            "id": "first-clip-123",
+            "streamer": "xQc",
+            "title": "Jean Paul delivery reaction",
+            "video_id": "vod-77",
+            "vod_offset": 412.0,
+            "created_at": "2026-09-15T18:00:00Z",
+            "duration": 30,
+        }
+        second = {**first, "id": "different-clip-456", "vod_offset": 435.0}
+        self.assertTrue(same_source_moment(source_moment(first), source_moment(second)))
+        with tempfile.TemporaryDirectory() as directory:
+            store = DedupeStore(Path(directory) / "processed.json")
+            store.record("first-clip-123", "prepared", source_moment=source_moment(first))
+            duplicate = store.find_duplicate(second)
+        self.assertEqual(duplicate["reason"], "same_source_moment")
+
+    def test_dedupe_imports_history_alias_without_relying_on_filename(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = DedupeStore(Path(directory) / "processed.json")
+            result = store.import_publication_history([
+                {
+                    "id": "buffer-old-1",
+                    "channel_name": "clipradar01",
+                    "service": "instagram",
+                    "status": "sent",
+                    "text": "Jean Paul just got an IRL delivery and xQc could not believe it #xQc #JeanPaul #GTARP",
+                }
+            ])
+            duplicate = store.find_duplicate({
+                "id": "new-clip-999",
+                "streamer": "xQc",
+                "title": "Jean Paul gets IRL GO Postal delivery",
+            })
+        self.assertEqual(result["imported"], 1)
+        self.assertEqual(duplicate["reason"], "publication_history_alias")
+
+    def test_perceptual_fingerprint_matches_same_media_without_same_id(self):
+        fingerprint = {
+            "sha256": "same-content",
+            "frame_hashes": ["0f" * 32, "f0" * 32],
+            "audio_signature": [10, 20, 30, 40],
+        }
+        comparison = fingerprint_similarity(fingerprint, dict(fingerprint))
+        self.assertTrue(comparison["duplicate"])
+        self.assertEqual(comparison["frame_similarity"], 1.0)
 
     def test_score_rewards_traction_without_replacing_freshness(self):
         fresh = {
@@ -109,6 +158,11 @@ class ClipRadarTests(unittest.TestCase):
         caption_lines = lines[3:5]
         self.assertTrue(caption_lines)
         self.assertTrue(all(len(line) <= 26 for line in caption_lines))
+
+    def test_hook_is_short_and_is_not_a_second_subtitle_system(self):
+        hook = build_hook("xQc", "Jean Paul gets IRL GO Postal delivery")
+        self.assertLessEqual(len(hook), 48)
+        self.assertNotIn("\n", hook)
 
     def test_metadata_is_platform_specific_and_contextual(self):
         metadata = build_metadata(

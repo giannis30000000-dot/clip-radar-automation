@@ -10,6 +10,25 @@ def _hashtag(value):
     return re.sub(r"[^A-Za-z0-9]", "", value or "")
 
 
+def build_hook(streamer, title, limit=48):
+    """Build a short factual title card; it is not a second subtitle track."""
+
+    broadcaster = clean_title(streamer, 24) or "Streamer"
+    subject = clean_title(title, 80) or "gaming moment"
+    value = f"{broadcaster}: {subject}"
+    if len(value) <= limit:
+        return value
+    available = max(8, limit - len(broadcaster) - 2)
+    words = subject.split()
+    shortened = ""
+    for word in words:
+        proposed = f"{shortened} {word}".strip()
+        if len(proposed) > available:
+            break
+        shortened = proposed
+    return f"{broadcaster}: {shortened or subject[:available].rstrip()}"[:limit].rstrip()
+
+
 def build_metadata(
     streamer,
     title,
@@ -20,7 +39,7 @@ def build_metadata(
     subject=clean_title(title,70) or "Untitled gaming moment"
     broadcaster=clean_title(streamer,40) or "Streamer"
     game=clean_title(game_name,50)
-    hook=f"{broadcaster}: {subject}"
+    hook=build_hook(broadcaster, subject)
     tags=[]
     for value in (broadcaster, game, "StreamerClips", "Gaming", "ClipRadar"):
         tag=_hashtag(value)

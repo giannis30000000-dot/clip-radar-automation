@@ -20,6 +20,7 @@ jobs:
       BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
       BUFFER_AUDIT_LOOKBACK_MINUTES: ${{ inputs.lookback_minutes }}
       CLIP_RADAR_OUTPUT_DIR: output
+      CLIP_RADAR_STATE_FILE: state/processed_clips.json
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,12 +30,32 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: pip install --disable-pip-version-check -r requirements.txt
+      - name: Restore persistent clip dedupe and publication history
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: clip-radar-dedupe-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            clip-radar-dedupe-${{ github.ref_name }}-
       - name: Query Buffer posts read-only
         run: python buffer_audit.py
+      - name: Save imported read-only history
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: clip-radar-dedupe-${{ github.ref_name }}-${{ github.run_id }}
       - name: Upload read-only audit
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: clip-radar-buffer-audit-${{ github.run_id }}
           path: output/buffer_audit.json
+          if-no-files-found: warn
+      - name: Upload persistent history import
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clip-radar-buffer-audit-state-${{ github.run_id }}
+          path: state/processed_clips.json
           if-no-files-found: warn

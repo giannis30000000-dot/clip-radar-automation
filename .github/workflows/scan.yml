@@ -71,6 +71,7 @@ jobs:
           PRODUCTION_SLOTS: '12:00,15:30,19:00,22:00'
           MAX_OUTPUTS: '1'
           MAX_CANDIDATES: '20'
+          MAX_RANKED_CANDIDATES: '100'
           WHISPER_MODEL: tiny
         run: python orchestrator.py
       - name: Save persistent clip and publication ledgers

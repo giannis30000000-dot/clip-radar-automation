@@ -1,0 +1,86 @@
+name: Clip Radar Final Quality Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      lookback_hours:
+        description: Hours of Twitch history to search for fresh eligible candidates
+        required: true
+        default: '48'
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: clip-radar-quality-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+      TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+      STREAMERS: xqc,kaicenat,jynxzi,caseoh_,stableronaldo,zackrawrr,sodapoppin,lacy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install --disable-pip-version-check -r requirements.txt
+      - name: Install ffmpeg for source validation, editing and frame inspection
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Run regression tests
+        run: python -m unittest discover -v
+      - name: Restore persistent clip and publication ledgers
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: clip-radar-dedupe-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            clip-radar-dedupe-${{ github.ref_name }}-
+      - name: Run three-clip quality validation with publishing disabled
+        env:
+          CLIP_RADAR_STATE_FILE: state/processed_clips.json
+          CLIP_RADAR_OUTPUT_DIR: output
+          CLIP_RADAR_LOOKBACK_HOURS: ${{ inputs.lookback_hours }}
+          PUBLISHING_ENABLED: 'false'
+          PUBLISHING_DRY_RUN: 'false'
+          ENABLE_YOUTUBE_PUBLISHING: 'false'
+          MAX_OUTPUTS: '3'
+          MAX_CANDIDATES: '100'
+          MAX_RANKED_CANDIDATES: '100'
+          WHISPER_MODEL: tiny
+          STRICT_MEDIA_DEDUPE: 'true'
+        run: python orchestrator.py
+      - name: Require three distinct real outputs and no publishing request
+        run: |
+          python -c "import json; from pathlib import Path; s=json.loads(Path('output/run_summary.json').read_text()); o=s.get('outputs', []); assert s.get('publishing_enabled') is False; assert len(o) >= 3, f'expected 3 outputs, got {len(o)}'; assert len({item['clip_id'] for item in o}) == len(o), 'duplicate output IDs'; print('quality validation outputs:', [item['clip_id'] for item in o])"
+      - name: Extract beginning, middle, payoff and subtitle-heavy frames
+        run: python inspection_frames.py output/final output/inspection_frames
+      - name: Save persistent clip and publication ledgers
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: clip-radar-dedupe-${{ github.ref_name }}-${{ github.run_id }}
+      - name: Upload source, final, reports and visual inspection frames
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clip-radar-quality-validation-${{ github.run_id }}
+          path: output
+          if-no-files-found: error
+      - name: Upload dedupe and publication state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clip-radar-quality-state-${{ github.run_id }}
+          path: state
+          if-no-files-found: warn
