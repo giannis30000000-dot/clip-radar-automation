@@ -9,6 +9,7 @@ from acquisition import AcquisitionError, AcquisitionResult, acquire_candidate
 import orchestrator
 from rights_gate import pick_eligible
 from scanner import total_score
+from media_processor import write_srt
 
 
 class ClipRadarTests(unittest.TestCase):
@@ -84,6 +85,18 @@ class ClipRadarTests(unittest.TestCase):
         self.assertEqual(result["status"], "READY")
         self.assertEqual(result["outputs"][0]["clip_id"], "second123")
         self.assertEqual(result["attempts"][0]["reason"], "first failed")
+
+    def test_subtitle_lines_are_bounded_for_vertical_render(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "captions.srt"
+            write_srt(
+                [{"start": 0.0, "end": 2.0, "text": "under arrest. Do you have the right"}],
+                path,
+            )
+            lines = path.read_text(encoding="utf-8").splitlines()
+        caption_lines = lines[3:5]
+        self.assertTrue(caption_lines)
+        self.assertTrue(all(len(line) <= 26 for line in caption_lines))
 
 
 if __name__ == "__main__":

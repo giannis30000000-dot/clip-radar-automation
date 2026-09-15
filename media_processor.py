@@ -41,7 +41,7 @@ def srt_timestamp(seconds: float):
 def write_srt(entries, path: Path):
     with path.open("w",encoding="utf-8") as f:
         for i,e in enumerate(entries,1):
-            caption=textwrap.fill(e["text"], width=30, max_lines=2, placeholder="…")
+            caption=textwrap.fill(e["text"], width=26, max_lines=2, placeholder="…")
             f.write(f"{i}\n{srt_timestamp(e['start'])} --> {srt_timestamp(e['end'])}\n{caption}\n\n")
 
 
@@ -103,7 +103,7 @@ def render_vertical(source: Path, output: Path, hook: str = "CLIP RADAR"):
         "[bg]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,boxblur=18:8,eq=brightness=-0.28[bgv];"
         "[fg]scale=720:1280:force_original_aspect_ratio=decrease[fgv];"
         "[bgv][fgv]overlay=(W-w)/2:(H-h)/2,"
-        f"subtitles='{subtitle_path}':force_style='FontSize=14,Outline=2,Shadow=1,Alignment=2,MarginV=115,WrapStyle=2',"
+        f"subtitles='{subtitle_path}':force_style='FontSize=10,Outline=2,Shadow=1,Alignment=2,MarginL=35,MarginR=35,MarginV=115,WrapStyle=2',"
         f"drawtext=textfile='{hook_path}':fontcolor=white:fontsize=27:borderw=3:bordercolor=black:x=(w-text_w)/2:y=70:line_spacing=5:enable='between(t,0,2.5)',"
         "drawtext=text='CLIP RADAR':fontcolor=white:fontsize=20:borderw=2:bordercolor=black:x=w-text_w-20:y=20")
     command=[ffmpeg_binary(),"-hide_banner","-loglevel","error","-y"]
