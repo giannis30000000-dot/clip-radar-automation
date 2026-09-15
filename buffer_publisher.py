@@ -398,10 +398,21 @@ class BufferPublisher:
                     "channel_id": request_plan["channel"]["id"],
                     "due_at": post.get("dueAt") or plan["publication_slot"]["utc_date_time"],
                 }
-                ledger.update_network(clip_id, network, result["status"], **result)
+                network_status = result["status"]
+                ledger.update_network(
+                    clip_id,
+                    network,
+                    network_status,
+                    **{key: value for key, value in result.items() if key != "status"},
+                )
             except Exception as exc:
                 result = {"status": "FAILED", "error": self._safe_error(exc), "channel_id": request_plan["channel"]["id"]}
-                ledger.update_network(clip_id, network, "FAILED", **result)
+                ledger.update_network(
+                    clip_id,
+                    network,
+                    "FAILED",
+                    **{key: value for key, value in result.items() if key != "status"},
+                )
             results[network] = result
         final_status = "QUEUED" if results and all(item["status"] in {"QUEUED", "PUBLISHED"} for item in results.values()) else "FAILED"
         ledger.upsert_clip(clip_id, final_status, buffer_media_url_stored=True)

@@ -311,6 +311,79 @@ class ClipRadarTests(unittest.TestCase):
         self.assertEqual(plan["networks"]["instagram"]["input"]["metadata"]["instagram"]["type"], "reel")
         self.assertEqual(plan["networks"]["tiktok"]["input"]["channelId"], "tt-1")
 
+    def test_buffer_live_publish_records_post_ids_without_duplicate_status_argument(self):
+        class FakeResponse:
+            ok = True
+            status_code = 200
+            headers = {}
+
+            def __init__(self, payload):
+                self.payload = payload
+
+            def json(self):
+                return self.payload
+
+        class FakeSession:
+            def __init__(self):
+                self.responses = [
+                    FakeResponse({"data": {"account": {"organizations": [{"id": "org-1", "name": "Clip Radar"}]}}}),
+                    FakeResponse({"data": {"channels": [
+                        {"id": "ig-1", "name": "clipradar01", "service": "instagram"},
+                        {"id": "tt-1", "name": "clipradar001", "service": "tiktok"},
+                    ]}}),
+                    FakeResponse({"data": {"createPost": {"post": {
+                        "id": "buffer-tt-1", "channelId": "tt-1", "dueAt": "2026-09-15T20:15:00.000Z", "status": "scheduled"
+                    }}}}),
+                    FakeResponse({"data": {"createPost": {"post": {
+                        "id": "buffer-ig-1", "channelId": "ig-1", "dueAt": "2026-09-15T20:15:00.000Z", "status": "scheduled"
+                    }}}}),
+                ]
+
+            def post(self, url, **kwargs):
+                return self.responses.pop(0)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = BufferConfig(
+                enabled=True,
+                dry_run=False,
+                networks=("tiktok", "instagram"),
+                timezone_name="Europe/Athens",
+                api_url="https://api.buffer.com",
+                api_key="test-only-key",
+                channel_config_path=root / "buffer_channels.json",
+                brand_name="Clip Radar",
+                instagram_channel_id=None,
+                tiktok_channel_id=None,
+                youtube_channel_id=None,
+                media_url=None,
+            )
+            publisher = BufferPublisher(config=config, session=FakeSession())
+            clip = ValidatedClip(
+                candidate={
+                    "id": "clip123",
+                    "streamer": "xQc",
+                    "title": "A real eligible moment",
+                    "url": "https://www.twitch.tv/xqc/clip/clip123",
+                },
+                final_path=root / "final.mp4",
+                qc_status="ready_for_publish_queue",
+            )
+            ledger = PublicationLedger(root / "publications.json")
+            with patch("buffer_publisher.validate_final", return_value=(True, "ready_for_publish_queue")):
+                plan = publisher.build_plan(
+                    clip,
+                    build_metadata("xQc", "A real eligible moment"),
+                    slot=datetime(2026, 9, 15, 22, 15, tzinfo=ZoneInfo("Europe/Athens")),
+                    media_url="https://res.cloudinary.com/demo/video/upload/clip123.mp4",
+                )
+                result = publisher.publish(clip, {}, ledger, plan=plan)
+        self.assertEqual(result["status"], "QUEUED")
+        self.assertEqual(result["networks"]["tiktok"]["buffer_post_id"], "buffer-tt-1")
+        self.assertEqual(result["networks"]["instagram"]["buffer_post_id"], "buffer-ig-1")
+        self.assertEqual(ledger.get("clip123")["networks"]["tiktok"]["status"], "QUEUED")
+        self.assertEqual(ledger.get("clip123")["networks"]["instagram"]["status"], "QUEUED")
+
     def test_cloudinary_upload_verifies_and_reuses_final_delivery(self):
         class FakeResponse:
             ok = True

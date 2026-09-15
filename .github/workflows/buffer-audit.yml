@@ -1,0 +1,40 @@
+name: Clip Radar Read-only Buffer Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      lookback_minutes:
+        description: Minutes of recent Buffer history to inspect
+        required: true
+        default: '180'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+      BUFFER_AUDIT_LOOKBACK_MINUTES: ${{ inputs.lookback_minutes }}
+      CLIP_RADAR_OUTPUT_DIR: output
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install --disable-pip-version-check -r requirements.txt
+      - name: Query Buffer posts read-only
+        run: python buffer_audit.py
+      - name: Upload read-only audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clip-radar-buffer-audit-${{ github.run_id }}
+          path: output/buffer_audit.json
+          if-no-files-found: warn
