@@ -112,6 +112,46 @@ def write_srt(entries, path: Path):
             )
 
 
+def ass_timestamp(seconds: float) -> str:
+    centiseconds = max(0, int(round(float(seconds) * 100)))
+    hours, centiseconds = centiseconds // 360000, centiseconds % 360000
+    minutes, centiseconds = centiseconds // 6000, centiseconds % 6000
+    whole, centiseconds = centiseconds // 100, centiseconds % 100
+    return f"{hours}:{minutes:02}:{whole:02}.{centiseconds:02}"
+
+
+def write_ass(entries, path: Path):
+    """Write one explicit-resolution libass transcript layer."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    header = """[Script Info]
+ScriptType: v4.00+
+PlayResX: 720
+PlayResY: 1280
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: ClipRadar,Arial,22,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,3,1,2,56,56,220,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(header)
+        for entry in entries:
+            caption = _wrap_caption(entry.get("text", ""))
+            if not caption:
+                continue
+            # PlayResX/PlayResY and an explicit position keep captions in the
+            # lower safe zone across ffmpeg/libass versions.
+            caption = caption.replace("\\", "\\\\").replace("\n", r"\N")
+            caption = r"{\an2\pos(360,1060)}" + caption
+            handle.write(
+                f"Dialogue: 0,{ass_timestamp(entry['start'])},{ass_timestamp(entry['end'])},ClipRadar,,0,0,0,,{caption}\n"
+            )
+
+
 def split_caption_entries(entries, max_words: int = 7):
     """Split ASR segments on words while preserving confidence and safe timing."""
 
@@ -193,8 +233,8 @@ def render_vertical(source: Path, output: Path, hook: str = "CLIP RADAR"):
         })
     first_caption_start = min((float(entry["start"]) for entry in entries), default=2.0)
     hook_active = round(min(1.8, max(0.0, first_caption_start - 0.08)), 3)
-    subs = output.with_suffix(".srt")
-    write_srt(entries, subs)
+    subs = output.with_suffix(".ass")
+    write_ass(entries, subs)
     hook_text = re.sub(r"\s+", " ", (hook or "CLIP RADAR").replace("\n", " ")).strip()[:48]
     hook_file = output.with_suffix(".hook.txt")
     hook_file.write_text(_wrap_caption(hook_text, 32), encoding="utf-8")
@@ -206,7 +246,7 @@ def render_vertical(source: Path, output: Path, hook: str = "CLIP RADAR"):
         "content_window": {"start": start, "end": end, "duration": round(end - start, 3), "editorial_basis": "setup_action_payoff_from_speech"},
         "hook": {"text": hook_text, "type": "title_card_drawtext", "active_seconds": hook_active, "is_subtitle": False},
         "subtitles": {
-            "system": "ffmpeg-libass-transcript",
+            "system": "ffmpeg-libass-ass-transcript",
             "subtitle_systems": 1,
             "caption_layers": 1,
             "hook_is_subtitle": False,

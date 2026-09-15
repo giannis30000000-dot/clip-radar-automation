@@ -18,6 +18,25 @@ def probe(path: Path):
 def _read_captions(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
+    if path.suffix.lower() == ".ass":
+        result = []
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if not line.startswith("Dialogue:"):
+                continue
+            fields = line.split(",", 9)
+            if len(fields) < 10:
+                continue
+            def ass_seconds(value: str) -> float:
+                hours, minutes, rest = value.strip().split(":")
+                whole, centiseconds = rest.split(".")
+                return int(hours) * 3600 + int(minutes) * 60 + int(whole) + int(centiseconds) / 100
+            text = re.sub(r"\{[^}]+\}", "", fields[9]).replace(r"\N", "\n").strip()
+            try:
+                start, end = ass_seconds(fields[1]), ass_seconds(fields[2])
+            except (ValueError, IndexError):
+                continue
+            result.append({"start": start, "end": end, "text": text})
+        return result
     blocks = re.split(r"\n\s*\n", path.read_text(encoding="utf-8", errors="replace").strip())
     result = []
     for block in blocks:

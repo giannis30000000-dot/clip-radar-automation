@@ -16,7 +16,7 @@ from content_safety import check_third_party_content
 import orchestrator
 from rights_gate import pick_eligible
 from scanner import total_score
-from media_processor import write_srt
+from media_processor import write_ass, write_srt
 from metricool_publisher import MetricoolConfig, MetricoolPublisher, PublicationBlocked, ValidatedClip
 from publication_state import PublicationLedger
 from publish_plan import build_hook, build_metadata
@@ -180,6 +180,15 @@ class ClipRadarTests(unittest.TestCase):
             path = Path(directory) / "captions.srt"
             write_srt([{"start": 0.0, "end": 1.0, "text": "one short caption"}], path)
             content = path.read_text(encoding="utf-8")
+        self.assertIn(r"{\an2\pos(360,1060)}", content)
+
+    def test_ass_subtitles_declare_vertical_play_resolution_and_position(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "captions.ass"
+            write_ass([{"start": 0.0, "end": 1.0, "text": "one short caption"}], path)
+            content = path.read_text(encoding="utf-8")
+        self.assertIn("PlayResX: 720", content)
+        self.assertIn("PlayResY: 1280", content)
         self.assertIn(r"{\an2\pos(360,1060)}", content)
 
     def test_hook_is_short_and_is_not_a_second_subtitle_system(self):
