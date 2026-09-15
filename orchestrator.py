@@ -1,8 +1,8 @@
 """Clip Radar's acquisition -> edit -> QC -> gated publication orchestrator.
 
 Publishing is still inert unless explicitly requested by configuration.  The
-normal Action run uses dry-run mode to create a Metricool plan without making
-any external write.
+normal Action run uses Buffer dry-run mode to create a sanitized plan without
+making any external post mutation.
 """
 
 from __future__ import annotations
