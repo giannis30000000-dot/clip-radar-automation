@@ -35,27 +35,36 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Run regression tests
         run: python -m unittest discover -v
-      - name: Restore persistent clip dedupe ledger
+      - name: Restore persistent clip and publication ledgers
         uses: actions/cache/restore@v4
         with:
-          path: state/processed_clips.json
+          path: state
           key: clip-radar-dedupe-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
             clip-radar-dedupe-${{ github.ref_name }}-
-      - name: Run automatic acquisition, edit and QC
+      - name: Run automatic acquisition, edit, QC and Metricool dry run
         env:
           CLIP_RADAR_STATE_FILE: state/processed_clips.json
+          CLIP_RADAR_PUBLICATION_STATE_FILE: state/publications.json
           CLIP_RADAR_OUTPUT_DIR: output
-          # Artifact validation is the only action enabled in this milestone.
+          # The cloud milestone creates a complete plan but never sends a
+          # Metricool request. Live publishing requires a separate deliberate
+          # workflow/configuration change after this plan is inspected.
+          PUBLISHING_ENABLED: 'false'
+          PUBLISHING_DRY_RUN: 'true'
+          METRICOOL_NETWORKS: 'tiktok,instagram'
+          ENABLE_YOUTUBE_PUBLISHING: 'false'
+          PRODUCTION_TIMEZONE: 'Europe/Athens'
+          PRODUCTION_SLOTS: '12:00,15:30,19:00,22:00'
           MAX_OUTPUTS: '1'
           MAX_CANDIDATES: '20'
           WHISPER_MODEL: tiny
         run: python orchestrator.py
-      - name: Save persistent clip dedupe ledger
+      - name: Save persistent clip and publication ledgers
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: state/processed_clips.json
+          path: state
           key: clip-radar-dedupe-${{ github.ref_name }}-${{ github.run_id }}
       - name: Upload original acquired landscape MP4
         if: always()
@@ -77,4 +86,11 @@ jobs:
         with:
           name: clip-radar-run-${{ github.run_id }}
           path: output/run_summary.json
+          if-no-files-found: warn
+      - name: Upload Metricool dry-run plan
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clip-radar-publishing-dry-run-${{ github.run_id }}
+          path: output/publishing_plan.json
           if-no-files-found: warn

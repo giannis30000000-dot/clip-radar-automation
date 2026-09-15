@@ -1,8 +1,8 @@
-"""Clip Radar's safe acquisition -> edit -> QC orchestrator.
+"""Clip Radar's acquisition -> edit -> QC -> gated publication orchestrator.
 
-This workflow prepares artifacts only. There is intentionally no publishing
-call here; a human must inspect the source and final artifacts before any
-social publishing integration is enabled.
+Publishing is still inert unless explicitly requested by configuration.  The
+normal Action run uses dry-run mode to create a Metricool plan without making
+any external write.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from dedupe import DedupeStore
 from media_processor import render_vertical
 from pipeline import Candidate, eligible_for_edit
 from publish_plan import build_metadata
+from publication_state import PublicationLedger
 from quality_control import validate_final
 from rights_gate import pick_eligible
 from scanner import print_candidates, scan_candidates
@@ -40,6 +41,33 @@ def _write_summary(path: Path, summary: dict[str, Any]) -> None:
     path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    return os.getenv(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _record_publication_state(
+    ledger: PublicationLedger | None,
+    raw: dict[str, Any],
+    status: str,
+    **metadata: Any,
+) -> None:
+    if not ledger:
+        return
+    clip_id = candidate_clip_id(raw)
+    if not clip_id:
+        return
+    existing = ledger.get(clip_id) or {}
+    if existing.get("status") in {"QUEUED", "PUBLISHING", "PUBLISHED"} and status in {"DISCOVERED", "ELIGIBLE"}:
+        return
+    ledger.upsert_clip(
+        clip_id,
+        status,
+        broadcaster=str(raw.get("streamer") or raw.get("broadcaster_name") or ""),
+        source_url=str(raw.get("url") or ""),
+        **metadata,
+    )
+
+
 def run_live(
     output_dir: Path | None = None,
     state_file: Path | None = None,
@@ -55,11 +83,28 @@ def run_live(
     source_dir = output_dir / "sources"
     final_dir = output_dir / "final"
     store = DedupeStore(state_file)
+    publishing_enabled = _env_bool("PUBLISHING_ENABLED")
+    publishing_dry_run = _env_bool("PUBLISHING_DRY_RUN")
+    publisher = None
+    publication_ledger = None
+    if publishing_enabled or publishing_dry_run:
+        from metricool_publisher import MetricoolPublisher
+
+        publisher = MetricoolPublisher()
+        publication_ledger = PublicationLedger(
+            Path(os.getenv("CLIP_RADAR_PUBLICATION_STATE_FILE", "state/publications.json"))
+        )
     now_candidates = scan_candidates()
     print_candidates(now_candidates)
     eligible, skipped = pick_eligible(now_candidates, limit=max_candidates)
     for item in skipped:
         candidate = item["candidate"]
+        _record_publication_state(
+            publication_ledger,
+            candidate,
+            "SKIPPED",
+            skip_reason=item["reason"],
+        )
         print(
             f"rights | SKIP | {candidate.get('id')} | {candidate.get('streamer')} | "
             f"{item['reason']}"
@@ -71,8 +116,16 @@ def run_live(
         "rights_skipped": len(skipped),
         "attempts": [],
         "outputs": [],
-        "publishing_enabled": False,
+        "publishing_enabled": publishing_enabled,
+        "publishing_dry_run": publishing_dry_run,
+        "publishing_plans": [],
     }
+    if publisher:
+        summary["publishing"] = {
+            "configuration": publisher.config.safe_summary(),
+            "plans": [],
+            "results": [],
+        }
     for raw in eligible:
         clip_id = candidate_clip_id(raw)
         candidate = _as_candidate(raw)
@@ -80,8 +133,11 @@ def run_live(
             print(f"dedupe | SKIP | {clip_id} | already_prepared_or_published")
             summary["attempts"].append({"clip_id": clip_id, "status": "DEDUPED"})
             continue
+        _record_publication_state(publication_ledger, raw, "DISCOVERED")
+        _record_publication_state(publication_ledger, raw, "ELIGIBLE")
         edit_ok, edit_reason = eligible_for_edit(candidate)
         if not edit_ok:
+            _record_publication_state(publication_ledger, raw, "SKIPPED", skip_reason=edit_reason)
             print(f"quality | SKIP | {clip_id} | {edit_reason}")
             summary["attempts"].append(
                 {"clip_id": clip_id, "status": "SKIP", "reason": edit_reason}
@@ -96,6 +152,13 @@ def run_live(
         attempt: dict[str, Any] = {"clip_id": clip_id, "status": "FAILED"}
         try:
             acquired = acquire_candidate(raw, source_dir, rights_verified=True)
+            _record_publication_state(
+                publication_ledger,
+                raw,
+                "ACQUIRED",
+                acquisition_method=acquired.method,
+                source=str(acquired.path),
+            )
             attempt.update(
                 {
                     "status": "ACQUIRED",
@@ -123,17 +186,30 @@ def run_live(
             )
             final_dir.mkdir(parents=True, exist_ok=True)
             final_path = final_dir / f"{clip_id}_clipradar_vertical.mp4"
-            render_vertical(acquired.path, final_path, hook=candidate.title[:55])
+            caption_entries = render_vertical(acquired.path, final_path, hook=candidate.title[:55])
+            _record_publication_state(
+                publication_ledger,
+                raw,
+                "RENDERED",
+                final_output_identifier=str(final_path),
+            )
             ok, reason = validate_final(final_path)
             if not ok:
                 final_path.unlink(missing_ok=True)
                 raise AcquisitionError(f"final QC failed: {reason}")
+            metadata = build_metadata(
+                candidate.streamer,
+                candidate.title,
+                game_name=str(raw.get("game_name") or ""),
+                source_url=candidate.url,
+                transcript_entries=caption_entries,
+            )
             attempt.update(
                 {
                     "status": "READY",
                     "final": str(final_path),
                     "final_validation": reason,
-                    "metadata": build_metadata(candidate.streamer, candidate.title),
+                    "metadata": metadata,
                 }
             )
             store.record(
@@ -144,15 +220,51 @@ def run_live(
                 final=str(final_path),
                 viral_score=candidate.score,
             )
+            _record_publication_state(
+                publication_ledger,
+                raw,
+                "QC_PASSED",
+                final_output_identifier=str(final_path),
+                viral_score=candidate.score,
+                views=candidate.views,
+                game=str(raw.get("game_name") or ""),
+            )
             summary["outputs"].append(attempt)
             summary["attempts"].append(attempt)
             print(
                 f"qc | PASS | clip_id={clip_id} | final={final_path} | "
                 "resolution=720x1280 | audio=present | subtitles=present | branding=present"
             )
+            if publisher and publication_ledger:
+                from metricool_publisher import ValidatedClip
+
+                validated_clip = ValidatedClip(
+                    candidate=raw,
+                    final_path=final_path,
+                    qc_status=reason,
+                )
+                plan = publisher.build_plan(validated_clip, metadata)
+                publication_ledger.upsert_clip(
+                    clip_id,
+                    "QC_PASSED",
+                    broadcaster=candidate.streamer,
+                    source_url=candidate.url,
+                    final_output_identifier=str(final_path),
+                    publication_timestamp=None,
+                    viral_score=candidate.score,
+                    views=candidate.views,
+                    game=str(raw.get("game_name") or ""),
+                )
+                summary["publishing_plans"].append(plan)
+                summary["publishing"]["plans"].append(plan)
+                if publishing_enabled:
+                    result = publisher.publish(validated_clip, metadata, publication_ledger)
+                    summary["publishing"]["results"].append(result)
+                    attempt["publication"] = result
             if len(summary["outputs"]) >= max_outputs:
                 break
         except Exception as exc:
+            _record_publication_state(publication_ledger, raw, "FAILED", error=str(exc))
             attempt["reason"] = str(exc)
             print(f"candidate | FAIL | clip_id={clip_id} | reason={exc}")
             summary["attempts"].append(attempt)
@@ -161,6 +273,17 @@ def run_live(
         summary["status"] = "READY"
     elif not eligible:
         summary["status"] = "NO_ELIGIBLE_CANDIDATES"
+    publishing_plan_path = output_dir / "publishing_plan.json"
+    if publisher:
+        _write_summary(publishing_plan_path, {
+            "schema_version": 1,
+            "status": "DRY_RUN_READY" if publishing_dry_run and not publishing_enabled else "QUEUED",
+            "plans": summary["publishing_plans"],
+            "configuration": publisher.config.safe_summary(),
+            "live_request_sent": bool(summary["publishing"].get("results")),
+        })
+    else:
+        publishing_plan_path.unlink(missing_ok=True)
     _write_summary(output_dir / "run_summary.json", summary)
     return summary
 
@@ -199,9 +322,10 @@ if __name__ == "__main__":
             "status": "BLOCKED",
             "reason": str(exc),
             "outputs": [],
-            "publishing_enabled": False,
+            "publishing_enabled": _env_bool("PUBLISHING_ENABLED"),
+            "publishing_dry_run": _env_bool("PUBLISHING_DRY_RUN"),
         }
         _write_summary(output_dir / "run_summary.json", summary)
-        print(f"run | status=BLOCKED | reason={exc} | publishing_enabled=False")
+        print(f"run | status=BLOCKED | reason={exc} | publishing_enabled={_env_bool('PUBLISHING_ENABLED')}")
         raise SystemExit(2) from exc
-    print(f"run | status={result['status']} | outputs={len(result['outputs'])} | publishing_enabled=False")
+    print(f"run | status={result['status']} | outputs={len(result['outputs'])} | publishing_enabled={result['publishing_enabled']}")
