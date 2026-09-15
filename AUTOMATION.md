@@ -91,5 +91,5 @@ Configure `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `BUFFER_API_KEY`,
 `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` as
 GitHub Actions secrets. Twitch credentials are used only for Helix discovery;
 the Buffer key is sent only as a Bearer token to `api.buffer.com`; Cloudinary
-credentials are used only by the signed upload/destroy adapter. Secret values
-are never printed, written to artifacts, or committed.
+credentials are used only for the server-side upload and signed destroy
+adapter. Secret values are never printed, written to artifacts, or committed.
