@@ -129,7 +129,11 @@ def inspect_final(path: Path, manifest_path: Path | None = None) -> dict[str, An
         report["visual_error"] = str(exc)
         report["checks"].update({"important_regions_visible": False, "no_blind_center_crop": False, "black_bar_control": False, "visual_variation": False})
     report["checks"]["hook_spatially_distinct"] = (manifest.get("hook") or {}).get("type") == "title_card_drawtext"
-    report["checks"]["source_caption_policy_configured"] = render_profile.get("source_caption_policy") == "central_lower_band_masked_before_single_transcript" and bool(render_profile.get("source_caption_mask"))
+    report["checks"]["source_caption_policy_configured"] = (
+        render_profile.get("source_caption_policy") == "central_lower_band_masked_before_single_transcript"
+        and render_profile.get("source_caption_mask_style") == "blurred_texture"
+        and bool(render_profile.get("source_caption_mask"))
+    )
     report["checks"]["pacing_window"] = 8 <= float((manifest.get("content_window") or {}).get("duration", duration)) <= 65
     report["status"] = "QUALITY_CHECK_PASSED" if all(report["checks"].values()) else "REVIEW_REQUIRED"
     report["reason"] = "all_container_subtitle_framing_and_pacing_checks_passed" if report["status"] == "QUALITY_CHECK_PASSED" else "strict_quality_check_failed"

@@ -267,6 +267,7 @@ def render_vertical(source: Path, output: Path, hook: str = "CLIP RADAR"):
             "black_bars_allowed": False,
             "source_caption_policy": "central_lower_band_masked_before_single_transcript",
             "source_caption_mask": {"x": 116, "y": 672, "width": 488, "height": 47},
+            "source_caption_mask_style": "blurred_texture",
         },
     }
     manifest_path = output.with_suffix(".render.json")
@@ -281,7 +282,12 @@ def render_vertical(source: Path, output: Path, hook: str = "CLIP RADAR"):
         # blurred/dark background; the expression handles both portrait and
         # landscape sources without a blind crop.
         "[bgv][fgv]overlay=(W-w)/2:(H-h)/2,"
-        f"drawbox=x=116:y=672:w=488:h=47:color=black@0.82:t=fill,"
+        # Blur the known lower source-caption band in-place. This neutralizes
+        # embedded Twitch captions without an opaque black stripe or a second
+        # readable text layer.
+        "split=2[composed][band_source];"
+        "[band_source]crop=488:47:116:672,boxblur=24:8[caption_band];"
+        "[composed][caption_band]overlay=116:672,"
         f"subtitles='{subtitle_path}':original_size=720x1280:force_style='FontName=Arial,FontSize=22,Outline=3,Shadow=1,Alignment=2,MarginL=56,MarginR=56,MarginV=185,WrapStyle=2',"
         f"drawbox=x=28:y=50:w=664:h=128:color=black@0.48:t=fill:enable='between(t,0,{hook_active:.3f})',"
         f"drawtext=textfile='{hook_path}':fontcolor=white:fontsize=28:borderw=3:bordercolor=black:x=(w-text_w)/2:y=72:line_spacing=5:enable='between(t,0,{hook_active:.3f})',"
