@@ -230,7 +230,11 @@ def render_vertical(source: Path, output: Path, hook: str = "CLIP RADAR"):
         "split=2[bg][fg];"
         "[bg]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,boxblur=24:12,eq=brightness=-0.35:saturation=0.9[bgv];"
         "[fg]scale=720:1280:force_original_aspect_ratio=decrease,setsar=1[fgv];"
-        "[bgv][fgv]overlay=(W-w)/2:310,"
+        # Center the preserved source in the 9:16 canvas.  A fixed vertical
+        # offset crops portrait Twitch clips and turns most of the render into
+        # blurred/dark background; the expression handles both portrait and
+        # landscape sources without a blind crop.
+        "[bgv][fgv]overlay=(W-w)/2:(H-h)/2,"
         f"drawbox=x=116:y=672:w=488:h=47:color=black@0.82:t=fill,"
         f"subtitles='{subtitle_path}':original_size=720x1280:force_style='FontName=Arial,FontSize=22,Outline=3,Shadow=1,Alignment=2,MarginL=56,MarginR=56,MarginV=185,WrapStyle=2',"
         f"drawbox=x=28:y=50:w=664:h=128:color=black@0.48:t=fill:enable='between(t,0,{hook_active:.3f})',"

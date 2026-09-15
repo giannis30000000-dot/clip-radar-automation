@@ -89,10 +89,26 @@ class ClipRadarTests(unittest.TestCase):
             "sha256": "same-content",
             "frame_hashes": ["0f" * 32, "f0" * 32],
             "audio_signature": [10, 20, 30, 40],
+            "duration": 30,
         }
         comparison = fingerprint_similarity(fingerprint, dict(fingerprint))
         self.assertTrue(comparison["duplicate"])
         self.assertEqual(comparison["frame_similarity"], 1.0)
+
+    def test_perceptual_fingerprint_does_not_treat_generic_hud_as_duplicate(self):
+        left = {
+            "sha256": "left", "duration": 30,
+            "frame_hashes": ["0f" * 32, "f0" * 32],
+            "audio_signature": [10, 20, 30, 40],
+            "frame_color_histograms": [[255, 0, 0, 0], [255, 0, 0, 0]],
+        }
+        right = {
+            "sha256": "right", "duration": 30,
+            "frame_hashes": ["0f" * 32, "f0" * 32],
+            "audio_signature": [10, 20, 30, 40],
+            "frame_color_histograms": [[0, 0, 0, 255], [0, 0, 0, 255]],
+        }
+        self.assertFalse(fingerprint_similarity(left, right)["duplicate"])
 
     def test_score_rewards_traction_without_replacing_freshness(self):
         fresh = {
