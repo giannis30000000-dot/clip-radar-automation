@@ -227,6 +227,16 @@ class ClipRadarTests(unittest.TestCase):
             self.assertTrue(restored.is_active("clip123"))
             self.assertEqual(restored.get("clip123")["networks"]["tiktok"]["metricool_id"], "post123")
 
+    def test_publication_ledger_retries_planning_failure_after_qc(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "publications.json"
+            ledger = PublicationLedger(path)
+            ledger.upsert_clip("clip123", "QC_PASSED")
+            ledger.upsert_clip("clip123", "FAILED", error="publisher planning failed")
+            self.assertTrue(ledger.needs_publication_retry("clip123"))
+            ledger.update_network("clip123", "instagram", "FAILED", error="post failed")
+            self.assertFalse(ledger.needs_publication_retry("clip123"))
+
     def test_third_party_content_check_fails_closed_for_obvious_broadcast_media(self):
         result = check_third_party_content(
             {"title": "Streamer reacts to a tournament broadcast", "game_name": "Just Chatting"},

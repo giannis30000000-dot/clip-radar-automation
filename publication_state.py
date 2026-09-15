@@ -89,6 +89,26 @@ class PublicationLedger:
             for network in (record.get("networks") or {}).values()
         )
 
+    def needs_publication_retry(self, clip_id: str) -> bool:
+        """Allow recovery after QC when publication planning itself failed.
+
+        The prepared-clip cache is intentionally permanent. A publishing
+        integration failure must not turn a successfully edited clip into a
+        permanently skipped item, though. Only a record that reached QC and
+        then failed without creating any per-network publication state is
+        retryable here; this cannot duplicate a queued or published post.
+        """
+
+        record = self.get(clip_id) or {}
+        if record.get("status") != "FAILED":
+            return False
+        if record.get("networks"):
+            return False
+        return any(
+            item.get("status") == "QC_PASSED"
+            for item in (record.get("state_history") or [])
+        )
+
     def upsert_clip(self, clip_id: str, status: str, **metadata: Any) -> dict[str, Any]:
         if status not in PIPELINE_STATES:
             raise ValueError(f"invalid publication state: {status}")

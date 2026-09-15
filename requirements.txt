@@ -1,3 +1,4 @@
 requests==2.32.3
 faster-whisper==1.2.0
 yt-dlp==2026.8.19
+tzdata==2026.4

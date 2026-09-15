@@ -136,7 +136,15 @@ def run_live(
         clip_id = candidate_clip_id(raw)
         candidate = _as_candidate(raw)
         retry_failed_publication = bool(
-            publisher and publication_ledger and publication_ledger.has_failed_network(clip_id)
+            publisher
+            and publication_ledger
+            and (
+                publication_ledger.has_failed_network(clip_id)
+                or (
+                    publishing_dry_run
+                    and publication_ledger.needs_publication_retry(clip_id)
+                )
+            )
         )
         if store.contains(clip_id) and not retry_failed_publication:
             print(f"dedupe | SKIP | {clip_id} | already_prepared_or_published")
