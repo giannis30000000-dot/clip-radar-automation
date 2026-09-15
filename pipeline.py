@@ -27,8 +27,6 @@ def eligible_for_edit(c: Candidate) -> tuple[bool, str]:
         return False, "insufficient_traction"
     if not 8 <= c.duration <= 60:
         return False, "duration_outside_shortform_range"
-    if not c.authorized_source_url:
-        return False, "no_authorized_source"
     return True, "ready"
 
 

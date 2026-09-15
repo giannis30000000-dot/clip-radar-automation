@@ -1,9 +1,8 @@
 from pathlib import Path
-import json, subprocess
+from media_tools import probe_media
 
 def probe(path: Path):
-    p=subprocess.run(["ffprobe","-v","error","-show_entries","format=duration:stream=codec_type,width,height","-of","json",str(path)],capture_output=True,text=True,check=True)
-    return json.loads(p.stdout)
+    return probe_media(path)
 
 def validate(path: Path):
     if not path.exists() or path.stat().st_size < 250_000: return False,"missing_or_tiny"

@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.venv/
+output/
+test_artifacts/
+state/processed_clips.json
+*.wav
+*.srt

@@ -15,13 +15,18 @@ def load_verified():
     return {k.lower():v for k,v in data.get("verified",{}).items() if v.get("viewer_social_sharing") is True}
 
 
+def eligible_broadcaster(candidate):
+    broadcaster=(candidate.get("streamer") or candidate.get("broadcaster_name") or candidate.get("broadcaster") or "").strip().lower()
+    return broadcaster if broadcaster in load_verified() else None
+
+
 def pick_eligible(ranked_candidates, limit=4):
     verified=load_verified(); selected=[]; skipped=[]
     for c in ranked_candidates:
-        broadcaster=(c.get("streamer") or c.get("broadcaster") or "").lower()
+        broadcaster=(c.get("streamer") or c.get("broadcaster_name") or c.get("broadcaster") or "").strip().lower()
         if broadcaster in verified:
             selected.append(c)
             if len(selected)>=limit: break
         else:
-            skipped.append({"candidate":c,"reason":"sharing_not_verified"})
+            skipped.append({"candidate":c,"reason":"sharing_not_verified","broadcaster":broadcaster})
     return selected, skipped

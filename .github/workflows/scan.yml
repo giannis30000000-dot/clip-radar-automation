@@ -1,4 +1,4 @@
-name: Clip Radar Scan
+name: Clip Radar Automatic Acquisition Test
 
 on:
   workflow_dispatch:
@@ -8,11 +8,16 @@ on:
 
 permissions:
   contents: read
+  actions: write
+
+concurrency:
+  group: clip-radar-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     env:
       TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
       TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
@@ -25,6 +30,51 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install dependencies
-        run: pip install -r requirements.txt
-      - name: Run fresh viral clip scan
-        run: python scanner.py
+        run: pip install --disable-pip-version-check -r requirements.txt
+      - name: Install ffmpeg for source validation and editing
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Run regression tests
+        run: python -m unittest discover -v
+      - name: Restore persistent clip dedupe ledger
+        uses: actions/cache/restore@v4
+        with:
+          path: state/processed_clips.json
+          key: clip-radar-dedupe-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            clip-radar-dedupe-${{ github.ref_name }}-
+      - name: Run automatic acquisition, edit and QC
+        env:
+          CLIP_RADAR_STATE_FILE: state/processed_clips.json
+          CLIP_RADAR_OUTPUT_DIR: output
+          # Artifact validation is the only action enabled in this milestone.
+          MAX_OUTPUTS: '1'
+          MAX_CANDIDATES: '20'
+          WHISPER_MODEL: tiny
+        run: python orchestrator.py
+      - name: Save persistent clip dedupe ledger
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state/processed_clips.json
+          key: clip-radar-dedupe-${{ github.ref_name }}-${{ github.run_id }}
+      - name: Upload original acquired landscape MP4
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clip-radar-source-${{ github.run_id }}
+          path: output/sources/*_landscape.mp4
+          if-no-files-found: warn
+      - name: Upload final edited vertical MP4
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clip-radar-final-${{ github.run_id }}
+          path: output/final/*_clipradar_vertical.mp4
+          if-no-files-found: warn
+      - name: Upload run summary and QC metadata
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clip-radar-run-${{ github.run_id }}
+          path: output/run_summary.json
+          if-no-files-found: warn
