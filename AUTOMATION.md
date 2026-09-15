@@ -56,10 +56,11 @@ or uncertain rights never publish.
 `media_processor.py` transcribes once and emits one FFmpeg/libass transcript
 subtitle layer. The short factual hook is a separate title-card drawtext
 element, disabled whenever a transcript caption is active; it is never added
-to the SRT. Captions are confidence-filtered, timed, wrapped to at most two
-mobile-readable lines, and kept inside the configured safe margins. The edit
-window is derived from speech setup/action/payoff rather than a fixed blind
-duration.
+to the SRT. Known Twitch burned-in caption bands are neutralized in the
+central lower source band before the Clip Radar layer is added. Captions are
+confidence-filtered, timed, wrapped to at most two mobile-readable lines, and
+kept inside the configured safe margins. The edit window is derived from
+speech setup/action/payoff rather than a fixed blind duration.
 
 `framing.py` samples decoded frames for face presence, motion, edge activity,
 and dark borders. Landscape sources use a full-frame fit over a blurred 9:16
