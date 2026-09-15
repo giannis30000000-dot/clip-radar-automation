@@ -274,7 +274,7 @@ def render_vertical(source: Path, output: Path, hook: str = "CLIP RADAR"):
     subtitle_path, hook_path = _filter_path(subs), _filter_path(hook_file)
     vf = (
         "split=2[bg][fg];"
-        "[bg]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,boxblur=24:12,eq=brightness=-0.35:saturation=0.9[bgv];"
+        "[bg]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,boxblur=24:12,eq=brightness=0.08:contrast=1.05:saturation=1.05[bgv];"
         "[fg]scale=720:1280:force_original_aspect_ratio=decrease,setsar=1[fgv];"
         # Center the preserved source in the 9:16 canvas.  A fixed vertical
         # offset crops portrait Twitch clips and turns most of the render into
