@@ -1,0 +1,60 @@
+name: Clip Radar Buffer Result Reconciliation
+
+on:
+  workflow_dispatch:
+    inputs:
+      reconciliation_json:
+        description: Read-only-audit-derived Buffer post mapping JSON
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BUFFER_RECONCILIATION_JSON: ${{ inputs.reconciliation_json }}
+      CLIP_RADAR_PUBLICATION_STATE_FILE: state/publications.json
+      CLIP_RADAR_OUTPUT_DIR: output
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install --disable-pip-version-check -r requirements.txt
+      - name: Restore persistent publication ledger
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: clip-radar-dedupe-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            clip-radar-dedupe-${{ github.ref_name }}-
+      - name: Reconcile audited Buffer result IDs without network writes
+        run: python buffer_reconcile.py
+      - name: Save persistent publication ledger
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: clip-radar-dedupe-${{ github.ref_name }}-${{ github.run_id }}
+      - name: Upload reconciliation audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clip-radar-buffer-reconciliation-${{ github.run_id }}
+          path: output/buffer_reconciliation.json
+          if-no-files-found: warn
+      - name: Upload publication state audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clip-radar-buffer-reconciled-state-${{ github.run_id }}
+          path: state/publications.json
+          if-no-files-found: warn

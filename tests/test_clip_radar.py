@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from dedupe import DedupeStore
 from acquisition import AcquisitionError, AcquisitionResult, acquire_candidate
 from buffer_publisher import BufferConfig, BufferPublisher
+from buffer_reconcile import reconcile
 from cloudinary_media_host import CloudinaryConfig, CloudinaryMediaHost
 from content_safety import check_third_party_content
 import orchestrator
@@ -237,6 +238,32 @@ class ClipRadarTests(unittest.TestCase):
             self.assertTrue(ledger.needs_publication_retry("clip123"))
             ledger.update_network("clip123", "instagram", "FAILED", error="post failed")
             self.assertFalse(ledger.needs_publication_retry("clip123"))
+
+    def test_buffer_reconciliation_marks_only_missing_network_retryable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "publications.json"
+            ledger = PublicationLedger(state_path)
+            ledger.upsert_clip("clip123", "FAILED", broadcaster="xQc")
+            result = reconcile(
+                [
+                    {
+                        "clip_id": "clip123",
+                        "network": "tiktok",
+                        "buffer_post_id": "buffer-123",
+                        "status": "PUBLISHED",
+                        "channel_id": "tt-1",
+                        "due_at": "2026-09-15T20:15:00.000Z",
+                    }
+                ],
+                state_path=state_path,
+                output_path=root / "reconciliation.json",
+            )
+            record = PublicationLedger(state_path).get("clip123")
+        self.assertEqual(result["entries"], 1)
+        self.assertEqual(record["networks"]["tiktok"]["status"], "PUBLISHED")
+        self.assertEqual(record["networks"]["tiktok"]["buffer_post_id"], "buffer-123")
+        self.assertEqual(record["networks"]["instagram"]["status"], "FAILED")
 
     def test_third_party_content_check_fails_closed_for_obvious_broadcast_media(self):
         result = check_third_party_content(
