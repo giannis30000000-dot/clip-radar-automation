@@ -286,7 +286,7 @@ def render_vertical(source: Path, output: Path, hook: str = "CLIP RADAR"):
         # embedded Twitch captions without an opaque black stripe or a second
         # readable text layer.
         "split=2[composed][band_source];"
-        "[band_source]crop=488:47:116:672,boxblur=24:8[caption_band];"
+        "[band_source]crop=488:47:116:672,boxblur=10:2[caption_band];"
         "[composed][caption_band]overlay=116:672,"
         f"subtitles='{subtitle_path}':original_size=720x1280:force_style='FontName=Arial,FontSize=22,Outline=3,Shadow=1,Alignment=2,MarginL=56,MarginR=56,MarginV=185,WrapStyle=2',"
         f"drawbox=x=28:y=50:w=664:h=128:color=black@0.48:t=fill:enable='between(t,0,{hook_active:.3f})',"
