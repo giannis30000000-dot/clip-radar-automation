@@ -241,12 +241,12 @@ def _adaptive_filter(framing: dict[str, Any], subtitle_path: str, hook_path: str
         main_branch = "[main_src]scale=720:405:force_original_aspect_ratio=decrease,pad=720:405:(ow-iw)/2:(oh-ih)/2,setsar=1[main]"
     else:
         main_branch = _crop_source("main_src", main, 720, panel_h, "main")
-    parts = ["[0:v]split=3[bgsrc][main_src][cam_src];", "[bgsrc]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,boxblur=18:8,eq=brightness=0.10:contrast=1.04:saturation=1.05[bg];", main_branch]
+    parts = ["[0:v]split=3[bgsrc][main_src][cam_src];", "[bgsrc]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,boxblur=18:8,eq=brightness=0.10:contrast=1.04:saturation=1.05[bg];", main_branch + ";"]
     parts.append(f"[bg][main]overlay=0:{panel_y}[layout0];")
     layout_label = "layout0"
     if category in {"GAMEPLAY_WITH_FACECAM", "BROWSER_REACTION"} and facecam:
         cam_region = {"x": float(facecam.get("x", 0.0)), "y": float(facecam.get("y", 0.0)), "width": float(facecam.get("width", 0.25)), "height": float(facecam.get("height", 0.3))}
-        parts.append(_crop_source("cam_src", cam_region, 300, 260, "cam"))
+        parts.append(_crop_source("cam_src", cam_region, 300, 260, "cam") + ";")
         parts.append(f"[layout0][cam]overlay=24:54[layout1];")
         layout_label = "layout1"
     mask = profile.get("mask") if framing.get("source_caption_detected") else None
