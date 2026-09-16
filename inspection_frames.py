@@ -25,11 +25,14 @@ def inspect_file(video: Path, destination: Path) -> dict[str, str]:
         data = json.loads(manifest.read_text(encoding="utf-8"))
         captions = list((data.get("subtitles") or {}).get("entries") or [])
     caption_time = float(captions[len(captions) // 2].get("start", duration / 2)) if captions else duration / 2
+    subtitle_time = max(0.0, min(duration - 0.05, caption_time))
     moments = {
-        "beginning": min(duration * 0.05, 1.0),
+        "opening": min(duration * 0.025, 0.45),
+        "early_setup": min(max(duration * 0.18, 1.2), duration - 0.05),
         "middle": duration * 0.50,
-        "payoff": duration * 0.86,
-        "subtitle": max(0.0, min(duration - 0.05, caption_time)),
+        "subtitle_heavy": subtitle_time,
+        "action_payoff": duration * 0.86,
+        "ending": max(0.0, duration - min(0.35, duration * 0.04)),
     }
     images = []
     results: dict[str, str] = {}
@@ -41,9 +44,8 @@ def inspect_file(video: Path, destination: Path) -> dict[str, str]:
         results[label] = str(path)
         images.append(frame)
     if images:
-        sheet = cv2.hconcat(images[:2])
-        bottom = cv2.hconcat(images[2:])
-        contact = cv2.vconcat([sheet, bottom])
+        rows = [cv2.hconcat(images[index:index + 2]) for index in range(0, len(images), 2)]
+        contact = cv2.vconcat(rows)
         contact_path = destination / "contact_sheet.png"
         cv2.imwrite(str(contact_path), contact)
         results["contact_sheet"] = str(contact_path)

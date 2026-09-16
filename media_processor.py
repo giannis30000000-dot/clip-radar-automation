@@ -96,7 +96,7 @@ def _wrap_caption(text: str, width: int = 24) -> str:
     return f"{first}\n{second}" if second else first
 
 
-def write_srt(entries, path: Path):
+def write_srt(entries, path: Path, position: tuple[int, int] = (360, 1060)):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
         for index, entry in enumerate(entries, 1):
@@ -106,7 +106,7 @@ def write_srt(entries, path: Path):
             # Keep one subtitle system, but pin every transcript caption to a
             # known bottom-center safe-zone anchor. Relying on implicit SRT
             # placement caused captions to land in the upper matte.
-            caption = "{\\an2\\pos(360,1060)}" + caption
+            caption = f"{{\\an2\\pos({int(position[0])},{int(position[1])})}}" + caption
             handle.write(
                 f"{index}\n{srt_timestamp(entry['start'])} --> {srt_timestamp(entry['end'])}\n{caption}\n\n"
             )
@@ -120,7 +120,7 @@ def ass_timestamp(seconds: float) -> str:
     return f"{hours}:{minutes:02}:{whole:02}.{centiseconds:02}"
 
 
-def write_ass(entries, path: Path):
+def write_ass(entries, path: Path, position: tuple[int, int] = (360, 1060)):
     """Write one explicit-resolution libass transcript layer."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -146,7 +146,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             # PlayResX/PlayResY and an explicit position keep captions in the
             # lower safe zone across ffmpeg/libass versions.
             caption = caption.replace("\\", "\\\\").replace("\n", r"\N")
-            caption = r"{\an2\pos(360,1060)}" + caption
+            caption = f"{{\\an2\\pos({int(position[0])},{int(position[1])})}}" + caption
             handle.write(
                 f"Dialogue: 0,{ass_timestamp(entry['start'])},{ass_timestamp(entry['end'])},ClipRadar,,0,0,0,,{caption}\n"
             )
@@ -214,12 +214,62 @@ def _content_window(duration: float, entries: list[dict[str, Any]]) -> tuple[flo
     return round(start, 3), round(end, 3)
 
 
+def _crop_source(label: str, region: dict[str, Any], width: int, height: int, output_label: str) -> str:
+    x = max(0.0, min(0.96, float(region.get("x", 0.0))))
+    y = max(0.0, min(0.96, float(region.get("y", 0.0))))
+    crop_width = max(0.04, min(1.0 - x, float(region.get("width", 1.0))))
+    crop_height = max(0.04, min(1.0 - y, float(region.get("height", 1.0))))
+    return (
+        f"[{label}]crop=w=iw*{crop_width:.4f}:h=ih*{crop_height:.4f}:x=iw*{x:.4f}:y=ih*{y:.4f},"
+        f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1[{output_label}]"
+    )
+
+
+def _adaptive_filter(framing: dict[str, Any], subtitle_path: str, hook_path: str, hook_active: float) -> str:
+    """Build a category-specific composition with only small support mattes."""
+
+    category = str(framing.get("layout_category") or "UNKNOWN")
+    profile = framing.get("render_profile") or {}
+    main = {
+        "x": float(profile.get("main_x", 0.0)), "y": float(profile.get("main_y", 0.0)),
+        "width": float(profile.get("main_w", 1.0)), "height": float(profile.get("main_h", 1.0)),
+    }
+    facecam = framing.get("region_manifest", {}).get("facecam")
+    panel_y = int(profile.get("panel_y", 438))
+    panel_h = int(profile.get("panel_h", 405))
+    if category == "UNKNOWN":
+        main_branch = "[main_src]scale=720:405:force_original_aspect_ratio=decrease,pad=720:405:(ow-iw)/2:(oh-ih)/2,setsar=1[main]"
+    else:
+        main_branch = _crop_source("main_src", main, 720, panel_h, "main")
+    parts = ["[0:v]split=3[bgsrc][main_src][cam_src];", "[bgsrc]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,boxblur=18:8,eq=brightness=0.10:contrast=1.04:saturation=1.05[bg];", main_branch]
+    parts.append(f"[bg][main]overlay=0:{panel_y}[layout0];")
+    layout_label = "layout0"
+    if category in {"GAMEPLAY_WITH_FACECAM", "BROWSER_REACTION"} and facecam:
+        cam_region = {"x": float(facecam.get("x", 0.0)), "y": float(facecam.get("y", 0.0)), "width": float(facecam.get("width", 0.25)), "height": float(facecam.get("height", 0.3))}
+        parts.append(_crop_source("cam_src", cam_region, 300, 260, "cam"))
+        parts.append(f"[layout0][cam]overlay=24:54[layout1];")
+        layout_label = "layout1"
+    mask = profile.get("mask") if framing.get("source_caption_detected") else None
+    masked_label = layout_label
+    if mask:
+        mask_x, mask_y = int(mask.get("x", 94)), int(mask.get("y", 900))
+        mask_w, mask_h = int(mask.get("width", 532)), int(mask.get("height", 64))
+        parts.append(f"[{layout_label}]split=2[composed][band_source];[band_source]crop={mask_w}:{mask_h}:{mask_x}:{mask_y},boxblur=10:2[caption_band];[composed][caption_band]overlay={mask_x}:{mask_y}[masked];")
+        masked_label = "masked"
+    parts.append(f"[{masked_label}]subtitles='{subtitle_path}':original_size=720x1280:force_style='FontName=Arial,FontSize=22,Outline=3,Shadow=1,Alignment=2,MarginL=56,MarginR=56,MarginV=170,WrapStyle=2'")
+    if hook_active > 0.0:
+        parts.append(f",drawbox=x=28:y=50:w=664:h=128:color=black@0.48:t=fill:enable='between(t,0,{hook_active:.3f})',drawtext=textfile='{hook_path}':fontcolor=white:fontsize=28:borderw=3:bordercolor=black:x=(w-text_w)/2:y=72:line_spacing=5:enable='between(t,0,{hook_active:.3f})'")
+    parts.append(",drawtext=text='CLIP RADAR':fontcolor=white:fontsize=20:borderw=2:bordercolor=black:x=w-text_w-20:y=18[vout]")
+    return "".join(parts)
+
+
 def render_vertical(source: Path, output: Path, hook: str = "CLIP RADAR"):
-    """Render one vertically framed video with exactly one transcript layer."""
+    """Render one adaptive vertical video with exactly one transcript layer."""
 
     output.parent.mkdir(parents=True, exist_ok=True)
     summary = media_summary(source)
     duration = float(summary.get("duration") or 0.0)
+    framing = analyze_video(source)
     transcript = split_caption_entries(transcribe(source))
     start, end = _content_window(duration, transcript)
     entries = []
@@ -232,15 +282,19 @@ def render_vertical(source: Path, output: Path, hook: str = "CLIP RADAR"):
             "end": round(min(end - start, float(entry["end"]) - start), 3),
         })
     first_caption_start = min((float(entry["start"]) for entry in entries), default=2.0)
-    hook_active = round(min(1.8, max(0.0, first_caption_start - 0.08)), 3)
+    hook_active = round(min(1.1, max(0.0, first_caption_start - 0.08)), 3)
+    if hook_active < 0.35:
+        hook_active = 0.0
+    profile = framing.get("render_profile") or {}
+    subtitle_y = int(profile.get("subtitle_y", 1060))
     subs = output.with_suffix(".ass")
-    write_ass(entries, subs)
+    write_ass(entries, subs, position=(360, subtitle_y))
     hook_text = re.sub(r"\s+", " ", (hook or "CLIP RADAR").replace("\n", " ")).strip()[:48]
     hook_file = output.with_suffix(".hook.txt")
     hook_file.write_text(_wrap_caption(hook_text, 32), encoding="utf-8")
-    framing = analyze_video(source)
+    mask = profile.get("mask") if framing.get("source_caption_detected") else None
     manifest = {
-        "schema_version": 2,
+        "schema_version": 3,
         "source": str(source),
         "source_duration": round(duration, 3),
         "content_window": {"start": start, "end": end, "duration": round(end - start, 3), "editorial_basis": "setup_action_payoff_from_speech"},
@@ -254,46 +308,30 @@ def render_vertical(source: Path, output: Path, hook: str = "CLIP RADAR"):
             "count": len(entries),
             "max_lines": 2,
             "max_chars_per_line": 24,
-            "safe_zone": {"left": 56, "right": 56, "bottom": 185, "top": 870},
-            "positioning": "explicit_ass_bottom_center",
-            "position": {"anchor": "bottom_center", "x": 360, "y": 1060},
+            "safe_zone": {"left": 56, "right": 56, "bottom": 150, "top": 900},
+            "positioning": "adaptive_ass_bottom_center",
+            "position": {"anchor": "bottom_center", "x": 360, "y": subtitle_y},
             "entries": entries,
         },
         "framing": framing,
         "render_profile": {
             "canvas": "720x1280",
-            "main_source": "full_frame_fit",
-            "zoom_ratio": 1.0,
+            "layout_category": framing.get("layout_category"),
+            "main_source": framing.get("layout"),
+            "zoom_ratio": framing.get("zoom_ratio", 1.0),
             "black_bars_allowed": False,
-            "source_caption_policy": "central_lower_band_masked_before_single_transcript",
-            "source_caption_mask": {"x": 116, "y": 672, "width": 488, "height": 47},
-            "source_caption_mask_style": "blurred_texture",
+            "blurred_background_role": "support_only_for_unused_canvas_area",
+            "source_caption_policy": "detected_region_local_blur_before_single_transcript",
+            "source_caption_mask": mask or {"detected": False, "reason": "no_reliable_source_caption_region"},
+            "source_caption_mask_style": "blurred_texture_localized",
+            "subtitle_position": {"x": 360, "y": subtitle_y, "safe_zone": "adaptive_layout_lower_safe_zone"},
         },
     }
     manifest_path = output.with_suffix(".render.json")
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     subtitle_path, hook_path = _filter_path(subs), _filter_path(hook_file)
-    vf = (
-        "split=2[bg][fg];"
-        "[bg]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,boxblur=24:12,eq=brightness=0.08:contrast=1.05:saturation=1.05[bgv];"
-        "[fg]scale=720:1280:force_original_aspect_ratio=decrease,setsar=1[fgv];"
-        # Center the preserved source in the 9:16 canvas.  A fixed vertical
-        # offset crops portrait Twitch clips and turns most of the render into
-        # blurred/dark background; the expression handles both portrait and
-        # landscape sources without a blind crop.
-        "[bgv][fgv]overlay=(W-w)/2:(H-h)/2,"
-        # Blur the known lower source-caption band in-place. This neutralizes
-        # embedded Twitch captions without an opaque black stripe or a second
-        # readable text layer.
-        "split=2[composed][band_source];"
-        "[band_source]crop=488:47:116:672,boxblur=10:2[caption_band];"
-        "[composed][caption_band]overlay=116:672,"
-        f"subtitles='{subtitle_path}':original_size=720x1280:force_style='FontName=Arial,FontSize=22,Outline=3,Shadow=1,Alignment=2,MarginL=56,MarginR=56,MarginV=185,WrapStyle=2',"
-        f"drawbox=x=28:y=50:w=664:h=128:color=black@0.48:t=fill:enable='between(t,0,{hook_active:.3f})',"
-        f"drawtext=textfile='{hook_path}':fontcolor=white:fontsize=28:borderw=3:bordercolor=black:x=(w-text_w)/2:y=72:line_spacing=5:enable='between(t,0,{hook_active:.3f})',"
-        "drawtext=text='CLIP RADAR':fontcolor=white:fontsize=20:borderw=2:bordercolor=black:x=w-text_w-20:y=18"
-    )
-    command = [ffmpeg_binary(), "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{start:.3f}", "-i", str(source), "-t", f"{end - start:.3f}", "-vf", vf, "-map", "0:v:0", "-map", "0:a:0?", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(output)]
+    vf = _adaptive_filter(framing, subtitle_path, hook_path, hook_active)
+    command = [ffmpeg_binary(), "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{start:.3f}", "-i", str(source), "-t", f"{end - start:.3f}", "-filter_complex", vf, "-map", "[vout]", "-map", "0:a:0?", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(output)]
     try:
         subprocess.run(command, check=True)
     finally:

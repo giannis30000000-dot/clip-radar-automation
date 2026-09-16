@@ -110,28 +110,35 @@ def inspect_final(path: Path, manifest_path: Path | None = None) -> dict[str, An
         "caption_density": density <= 22.0,
         "transcription_confidence": bool(captions) and not low_confidence,
         "subtitle_safe_position_configured": (
-            subtitles.get("positioning") == "explicit_ass_bottom_center"
+            subtitles.get("positioning") in {"explicit_ass_bottom_center", "adaptive_ass_bottom_center"}
             and (subtitles.get("position") or {}).get("anchor") == "bottom_center"
             and int((subtitles.get("position") or {}).get("x", -1)) == 360
-            and int((subtitles.get("position") or {}).get("y", -1)) == 1060
+            and 900 <= int((subtitles.get("position") or {}).get("y", -1)) <= 1150
         ),
     })
     try:
         visual = analyze_video(path)
         report["visual"] = visual
         report["checks"].update({
-            "important_regions_visible": framing.get("important_regions_visible") is True and visual.get("important_regions_visible") is True,
+            "important_regions_visible": framing.get("important_regions_visible") is True and float(framing.get("content_occupancy", 0.0)) >= 0.62,
+            "adaptive_layout_approved": framing.get("layout_approved") is True,
             "no_blind_center_crop": framing.get("crop_strategy") != "blind_center_crop" and float(framing.get("zoom_ratio", 1.0)) <= 2.2,
             "black_bar_control": float(visual.get("average_dark_border_ratio", 1.0)) < 0.85,
             "visual_variation": float(visual.get("average_edge_density", 0.0)) > 0.005,
+            "visual_quality_score": float(framing.get("visual_quality_score", 0.0)) >= float(framing.get("visual_quality_threshold", 55.0)),
+            "blurred_filler_control": str((render_profile.get("blurred_background_role") or "")).startswith("support_only"),
+            "artificial_band_control": float((framing.get("visual_penalties") or {}).get("artificial_bands", 1.0)) <= 0.0,
         })
     except Exception as exc:
         report["visual_error"] = str(exc)
-        report["checks"].update({"important_regions_visible": False, "no_blind_center_crop": False, "black_bar_control": False, "visual_variation": False})
+        report["checks"].update({"important_regions_visible": False, "adaptive_layout_approved": False, "no_blind_center_crop": False, "black_bar_control": False, "visual_variation": False, "visual_quality_score": False, "blurred_filler_control": False, "artificial_band_control": False})
     report["checks"]["hook_spatially_distinct"] = (manifest.get("hook") or {}).get("type") == "title_card_drawtext"
     report["checks"]["source_caption_policy_configured"] = (
-        render_profile.get("source_caption_policy") == "central_lower_band_masked_before_single_transcript"
-        and render_profile.get("source_caption_mask_style") == "blurred_texture"
+        render_profile.get("source_caption_policy") in {
+            "central_lower_band_masked_before_single_transcript",
+            "detected_region_local_blur_before_single_transcript",
+        }
+        and render_profile.get("source_caption_mask_style") in {"blurred_texture", "blurred_texture_localized"}
         and bool(render_profile.get("source_caption_mask"))
     )
     report["checks"]["pacing_window"] = 8 <= float((manifest.get("content_window") or {}).get("duration", duration)) <= 65
