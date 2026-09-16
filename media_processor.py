@@ -287,6 +287,21 @@ def render_vertical(source: Path, output: Path, hook: str = "CLIP RADAR"):
             "start": round(max(0.0, float(entry["start"]) - start), 3),
             "end": round(min(end - start, float(entry["end"]) - start), 3),
         })
+    # ASR segments occasionally overlap after short chunks are expanded to a
+    # readable minimum duration. Keep exactly one readable timeline: later
+    # captions start at the prior caption's end, and unusably short remnants
+    # are dropped instead of being rendered on top of each other.
+    entries.sort(key=lambda item: (float(item["start"]), float(item["end"])))
+    timed_entries: list[dict[str, Any]] = []
+    for entry in entries:
+        caption_start = float(entry["start"])
+        caption_end = float(entry["end"])
+        if timed_entries:
+            caption_start = max(caption_start, float(timed_entries[-1]["end"]))
+        if caption_end - caption_start < 0.18:
+            continue
+        timed_entries.append({**entry, "start": round(caption_start, 3), "end": round(caption_end, 3)})
+    entries = timed_entries
     first_caption_start = min((float(entry["start"]) for entry in entries), default=2.0)
     hook_active = round(min(1.1, max(0.0, first_caption_start - 0.08)), 3)
     if hook_active < 0.35:
