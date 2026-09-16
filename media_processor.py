@@ -241,10 +241,12 @@ def _adaptive_filter(framing: dict[str, Any], subtitle_path: str, hook_path: str
         main_branch = "[main_src]scale=720:405:force_original_aspect_ratio=decrease,pad=720:405:(ow-iw)/2:(oh-ih)/2,setsar=1[main]"
     else:
         main_branch = _crop_source("main_src", main, 720, panel_h, "main")
-    parts = ["[0:v]split=3[bgsrc][main_src][cam_src];", "[bgsrc]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,boxblur=18:8,eq=brightness=0.10:contrast=1.04:saturation=1.05[bg];", main_branch + ";"]
+    needs_cam = category in {"GAMEPLAY_WITH_FACECAM", "BROWSER_REACTION"} and bool(facecam)
+    split_labels = "[bgsrc][main_src][cam_src]" if needs_cam else "[bgsrc][main_src]"
+    parts = [f"[0:v]split={3 if needs_cam else 2}{split_labels};", "[bgsrc]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,boxblur=18:8,eq=brightness=0.10:contrast=1.04:saturation=1.05[bg];", main_branch + ";"]
     parts.append(f"[bg][main]overlay=0:{panel_y}[layout0];")
     layout_label = "layout0"
-    if category in {"GAMEPLAY_WITH_FACECAM", "BROWSER_REACTION"} and facecam:
+    if needs_cam:
         cam_region = {"x": float(facecam.get("x", 0.0)), "y": float(facecam.get("y", 0.0)), "width": float(facecam.get("width", 0.25)), "height": float(facecam.get("height", 0.3))}
         parts.append(_crop_source("cam_src", cam_region, 300, 260, "cam") + ";")
         parts.append(f"[layout0][cam]overlay=24:54[layout1];")
@@ -334,6 +336,11 @@ def render_vertical(source: Path, output: Path, hook: str = "CLIP RADAR"):
     command = [ffmpeg_binary(), "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{start:.3f}", "-i", str(source), "-t", f"{end - start:.3f}", "-filter_complex", vf, "-map", "[vout]", "-map", "0:a:0?", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(output)]
     try:
         subprocess.run(command, check=True)
+    except Exception:
+        # ffmpeg can create a zero-byte or truncated output before reporting a
+        # filter/download failure. Never leave that artifact for later QC.
+        output.unlink(missing_ok=True)
+        raise
     finally:
         hook_file.unlink(missing_ok=True)
     return entries
