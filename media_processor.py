@@ -238,7 +238,11 @@ def _adaptive_filter(framing: dict[str, Any], subtitle_path: str, hook_path: str
     panel_y = int(profile.get("panel_y", 438))
     panel_h = int(profile.get("panel_h", 405))
     if category == "UNKNOWN":
-        main_branch = "[main_src]scale=720:405:force_original_aspect_ratio=decrease,pad=720:405:(ow-iw)/2:(oh-ih)/2,setsar=1[main]"
+        # This path is review-only and is never publish-eligible. A direct
+        # deterministic scale avoids ffmpeg's odd-dimension pad failures on
+        # unusual source encodings while QC still rejects the low-occupancy
+        # fallback via layout_approved and visual_quality_score.
+        main_branch = "[main_src]scale=720:405,setsar=1[main]"
     else:
         main_branch = _crop_source("main_src", main, 720, panel_h, "main")
     needs_cam = category in {"GAMEPLAY_WITH_FACECAM", "BROWSER_REACTION"} and bool(facecam)
