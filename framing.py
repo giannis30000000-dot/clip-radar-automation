@@ -114,8 +114,10 @@ def _classify(frames: list[dict[str, Any]], facecam: dict[str, Any] | None, aspe
     simultaneous_multi = sum(int(item["face_count"]) >= 2 for item in frames) >= max(2, len(frames) // 3)
     browser_score = sum(float(item["browser_score"]) for item in frames) / max(len(frames), 1)
     dominant_face = sum(float(item["dominant_face_ratio"]) for item in frames) / max(len(frames), 1)
-    if browser_score >= 0.58 and (average_motion < 0.08 or browser_score >= 0.72) and (facecam or average_faces > 0):
+    if browser_score >= 0.58 and (average_motion < 0.08 or browser_score >= 0.72) and facecam:
         return "BROWSER_REACTION", "persistent browser-like chrome/text regions with a visible reaction subject"
+    if not facecam and max_motion >= 0.12:
+        return "FULLSCREEN_GAMEPLAY", "high-motion screen content with no separate reaction camera detected"
     if facecam and (max_motion >= 0.105 or average_motion >= 0.055):
         return "GAMEPLAY_WITH_FACECAM", "small persistent corner facecam plus independent high-motion screen content"
     if simultaneous_multi and average_motion < 0.115:
@@ -135,12 +137,12 @@ def _profile(category: str, facecam: dict[str, Any] | None, frames: list[dict[st
         primary_center = 0.67 if float(facecam["x"]) < 0.5 else 0.33
     average_browser = sum(float(item["browser_score"]) for item in frames) / max(len(frames), 1)
     profiles = {
-        "GAMEPLAY_WITH_FACECAM": {"main_x": max(0.18, float(facecam["x"]) + float(facecam["width"]) - 0.02) if facecam and float(facecam["x"]) < 0.5 else 0.0, "main_y": 0.0, "main_w": 0.78 if facecam and float(facecam["x"]) < 0.5 else 0.80, "main_h": 0.98, "panel_y": 330, "panel_h": 900, "occupancy": 0.78, "subtitle_y": 1112, "mask": {"x": 94, "y": 944, "width": 532, "height": 70}},
-        "BROWSER_REACTION": {"main_x": max(0.16, float(facecam["x"]) + float(facecam["width"]) + 0.02) if facecam and float(facecam["x"]) < 0.5 else 0.06, "main_y": 0.06, "main_w": 0.78 if facecam and float(facecam["x"]) < 0.5 else 0.88, "main_h": 0.88, "panel_y": 410, "panel_h": 820, "occupancy": 0.75, "subtitle_y": 1110, "mask": {"x": 94, "y": 922, "width": 532, "height": 64}},
-        "FACECAM_REACTION": {"main_x": max(0.0, primary_center - 0.40), "main_y": 0.02, "main_w": 0.80, "main_h": 0.96, "panel_y": 105, "panel_h": 1060, "occupancy": 0.86, "subtitle_y": 1110, "mask": {"x": 94, "y": 770, "width": 532, "height": 82}},
-        "FULLSCREEN_GAMEPLAY": {"main_x": 0.11, "main_y": 0.02, "main_w": 0.78, "main_h": 0.96, "panel_y": 70, "panel_h": 1130, "occupancy": 0.90, "subtitle_y": 1110, "mask": {"x": 94, "y": 770, "width": 532, "height": 82}},
-        "GTA_RP_CONVERSATION": {"main_x": 0.09, "main_y": 0.02, "main_w": 0.82, "main_h": 0.96, "panel_y": 170, "panel_h": 980, "occupancy": 0.82, "subtitle_y": 1100, "mask": {"x": 94, "y": 810, "width": 532, "height": 78}},
-        "MULTI_SUBJECT": {"main_x": 0.08, "main_y": 0.02, "main_w": 0.84, "main_h": 0.96, "panel_y": 150, "panel_h": 1000, "occupancy": 0.83, "subtitle_y": 1100, "mask": {"x": 94, "y": 820, "width": 532, "height": 78}},
+        "GAMEPLAY_WITH_FACECAM": {"main_x": max(0.18, float(facecam["x"]) + float(facecam["width"]) - 0.02) if facecam and float(facecam["x"]) < 0.5 else 0.0, "main_y": 0.0, "main_w": 0.78 if facecam and float(facecam["x"]) < 0.5 else 0.80, "main_h": 0.98, "panel_y": 330, "panel_h": 900, "occupancy": 0.78, "subtitle_y": 1112, "mask": {"x": 94, "y": 1060, "width": 532, "height": 120}},
+        "BROWSER_REACTION": {"main_x": max(0.16, float(facecam["x"]) + float(facecam["width"]) + 0.02) if facecam and float(facecam["x"]) < 0.5 else 0.06, "main_y": 0.08, "main_w": 0.78 if facecam and float(facecam["x"]) < 0.5 else 0.88, "main_h": 0.82, "panel_y": 410, "panel_h": 820, "occupancy": 0.75, "subtitle_y": 1110, "mask": {"x": 94, "y": 1050, "width": 532, "height": 130}},
+        "FACECAM_REACTION": {"main_x": max(0.0, primary_center - 0.40), "main_y": 0.02, "main_w": 0.80, "main_h": 0.96, "panel_y": 105, "panel_h": 1060, "occupancy": 0.86, "subtitle_y": 1110, "mask": {"x": 94, "y": 1040, "width": 532, "height": 120}},
+        "FULLSCREEN_GAMEPLAY": {"main_x": 0.11, "main_y": 0.02, "main_w": 0.78, "main_h": 0.96, "panel_y": 70, "panel_h": 1130, "occupancy": 0.90, "subtitle_y": 1110, "mask": {"x": 94, "y": 1050, "width": 532, "height": 130}},
+        "GTA_RP_CONVERSATION": {"main_x": 0.09, "main_y": 0.02, "main_w": 0.82, "main_h": 0.96, "panel_y": 170, "panel_h": 980, "occupancy": 0.82, "subtitle_y": 1100, "mask": {"x": 94, "y": 1020, "width": 532, "height": 110}},
+        "MULTI_SUBJECT": {"main_x": 0.08, "main_y": 0.02, "main_w": 0.84, "main_h": 0.96, "panel_y": 150, "panel_h": 1000, "occupancy": 0.83, "subtitle_y": 1100, "mask": {"x": 94, "y": 1030, "width": 532, "height": 110}},
         "UNKNOWN": {"main_x": 0.0, "main_y": 0.0, "main_w": 1.0, "main_h": 1.0, "panel_y": 438, "panel_h": 405, "occupancy": 0.43, "subtitle_y": 1060, "mask": {"x": 116, "y": 672, "width": 488, "height": 47}},
     }
     result = dict(profiles.get(category, profiles["UNKNOWN"]))
@@ -215,7 +217,7 @@ def analyze_video(path: Path, sample_count: int = 7) -> dict[str, Any]:
         "tiny_content": round(max(0.0, 0.60 - float(profile["occupancy"])) * 24.0, 2),
     }
     score = round(max(0.0, 100.0 - sum(penalties.values())), 2)
-    source_caption_region = _region(0.18, 0.58, 0.64, 0.14, role="possible_source_caption")
+    source_caption_region = _region(0.18, 0.72, 0.64, 0.18, role="possible_source_caption")
     source_caption_signal = sum(float(item["edge_density"]) for item in frames if float(item["time"]) >= duration * 0.45) / max(len(frames) // 2, 1)
     source_caption_detected = bool(source_caption_signal >= average_edge_density * 0.93 and average_edge_density >= 0.018)
     face_regions = []
