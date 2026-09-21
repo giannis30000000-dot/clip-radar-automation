@@ -86,6 +86,27 @@ def _validate_candidate_payload(payload):
     return payload
 
 
+def _dialogue_timing_summary(story):
+    """Return safe, mechanical timing facts for rewrite feedback and telemetry."""
+    lines = story.get("dialogue") if isinstance(story, dict) else None
+    word_count = sum(len(line.get("text", "").split()) for line in lines if isinstance(line, dict)) if isinstance(lines, list) else 0
+    duration = story.get("estimated_voice_duration_seconds") if isinstance(story, dict) else None
+    return word_count, duration
+
+
+def _require_production_timing(story):
+    """Reject a script outside the existing production duration policy before critique/paid media."""
+    word_count, duration = _dialogue_timing_summary(story)
+    policy = duration_policy()
+    if not isinstance(duration, (int, float)) or not policy["minimum"] <= duration <= policy["maximum"]:
+        raise ValueError(
+            f"DIALOGUE_TIMING_CONTRACT_FAILED: {word_count} spoken words normalize to {duration!r}s; "
+            f"production requires {policy['minimum']:.0f}-{policy['maximum']:.0f}s. "
+            "Rewrite with meaningful conversational turns covering escalation and payoff, never filler."
+        )
+    return word_count, duration
+
+
 class DialogueStoryProvider(ChatStoryProvider):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -178,10 +199,13 @@ class DialogueStoryProvider(ChatStoryProvider):
                     "No visible text, signage, logos or UI. Favor medium/wide expressive acting and listener reactions; no mouth closeups or precise lip-sync. "
                 )
             prompt = (
-                f"Write the selected concept as a {policy['minimum']}-75 second DIALOGUE-FIRST skit. Default aim 65-75s, about 175-190 words at 165wpm plus brief turn pauses. "
+                f"Write the selected concept as a {policy['minimum']}-75 second DIALOGUE-FIRST skit. Default aim 65-75s. "
+                "Hard timing contract: return 175-195 spoken dialogue words across 18-26 meaningful turns; count only dialogue[].text, not action or visual fields. "
+                "At 165 words per minute plus brief turn pauses, this must mechanically normalize to 65-75 seconds. "
+                "Before returning JSON, self-check the word count and add meaningful reaction/escalation turns if it is short; tighten redundant turns if it is long. Never pad, repeat a gag, slow speech or add dead air. "
                 "2-4 speaking characters; optional narrator ID narrator with under 20% of words. New cast/world/style allowed every video. "
                 "First line is ONLY a 4-5-word immediate hook. Then goal, conflict, causal escalation, at least three reaction/punchline beats and final earned payoff. "
-                "Natural short character-specific turns, no exposition dumps, filler, repeated gags or artificial stretching. 8-12 scenes, each under 10 seconds, 1-3 lines each. "
+                "Natural short character-specific turns, no exposition dumps or generic narration. 8-12 scenes, each under 10 seconds, 1-3 lines each. "
                 "Return JSON with title, hook (exact opening text), ending_type=standalone unless a sequel truly improves it, sequel_possible:boolean, "
                 "characters:[{character_id,name,personality,speaking_style,visual_description,description,voice_profile_hint}], "
                 "dialogue:[{speaker_id,text,emotion,scene_number,action,listeners:[character_id]}] in playback order, "
@@ -191,28 +215,39 @@ class DialogueStoryProvider(ChatStoryProvider):
                 + visual_instructions +
                 f"Selected concept: {json.dumps(selected)}. Rewrite feedback: {feedback}"
             )
+            normalized_story = None
             try:
                 story = self._request(prompt, "dialogue_script")
                 story.update(story_id="dialogue-" + uuid.uuid4().hex[:16], concept=selected["concept"], content_category=selected["category"], trope=selected["trope"])
                 story["generation"] = {"provider": "dialogue-chat", "candidate_selection": self.selection, "script_attempts": self.script_attempts, "review_required": True}
-                story = normalize_dialogue(story)
-                validate_story(story)
+                normalized_story = normalize_dialogue(story)
+                word_count, duration = _require_production_timing(normalized_story)
+                normalized_story["generation"].update(dialogue_word_count=word_count, estimated_dialogue_duration_seconds=duration)
+                validate_story(normalized_story)
                 if os.getenv("STORY_REFERENCE_PROVIDER") == "runway":
                     from .reference_images import build_visual_bible
-                    story["visual_bible"] = build_visual_bible(story)
-                critique = self._request("Independently evaluate this script, not its author's confidence. Score each requested criterion 0-10 with minimum acceptable 7. Be strict about causal escalation, conversational dialogue, first-two-second hook, final payoff and 65-75s engagement without filler. Return {scores:{metric:number},issues:[short actionable issues]}. Criteria: " + json.dumps(QUALITY_METRICS) + ". Script: " + json.dumps(story), "editorial_critique")
-                story["generation"]["editorial_review"] = critique["scores"]
-                quality = evaluate_story(story)
+                    normalized_story["visual_bible"] = build_visual_bible(normalized_story)
+                critique = self._request("Independently evaluate this script, not its author's confidence. Score each requested criterion 0-10 with minimum acceptable 7. Be strict about causal escalation, conversational dialogue, first-two-second hook, final payoff and 65-75s engagement without filler. Return {scores:{metric:number},issues:[short actionable issues]}. Criteria: " + json.dumps(QUALITY_METRICS) + ". Script: " + json.dumps(normalized_story), "editorial_critique")
+                normalized_story["generation"]["editorial_review"] = critique["scores"]
+                quality = evaluate_story(normalized_story)
                 write_json(self.budget.paths[0].with_name(f"story_quality_attempt_{self.script_attempts}.json"), {"quality": quality, "critique": critique})
                 if quality["status"] == "PASSED":
                     if self.history and not reserved:
-                        self.history.ensure_new(story)
-                    story["story_quality"] = quality
-                    return story
+                        self.history.ensure_new(normalized_story)
+                    normalized_story["story_quality"] = quality
+                    return normalized_story
                 feedback = json.dumps({"failed_checks": quality["failed_checks"], "issues": critique.get("issues", [])})
             except (ValueError, KeyError, TypeError, IndexError, AttributeError, DuplicatePremise) as exc:
-                feedback = "Invalid schema, dialogue timing, duplicate premise or missing required fields; rewrite coherently. " + str(sanitize(str(exc)))[:250]
-            self.budget.event("story", "STORY_REWRITE_REQUIRED", attempt=self.script_attempts, feedback=feedback)
+                timing = ""
+                if normalized_story is not None:
+                    words, duration = _dialogue_timing_summary(normalized_story)
+                    timing = f" Measured dialogue before rejection: {words} words, {duration!r}s after normalization."
+                feedback = "Invalid schema, dialogue timing, duplicate premise or missing required fields; rewrite coherently. " + str(sanitize(str(exc)))[:250] + timing
+            event_fields = {"attempt": self.script_attempts, "feedback": feedback}
+            if normalized_story is not None:
+                words, duration = _dialogue_timing_summary(normalized_story)
+                event_fields.update(dialogue_word_count=words, estimated_dialogue_duration_seconds=duration)
+            self.budget.event("story", "STORY_REWRITE_REQUIRED", **event_fields)
         raise ProviderFailure("STORY_QUALITY_ATTEMPTS_EXHAUSTED")
 
     def rewrite(self, story, feedback):

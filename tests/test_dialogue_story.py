@@ -111,6 +111,27 @@ class DialogueTests(unittest.TestCase):
         self.assertEqual([c.args[1] for c in provider._request.call_args_list], ["candidate_concepts", "dialogue_script", "editorial_critique"])
         self.assertEqual(result["story_quality"]["status"], "PASSED")
 
+    def test_short_script_gets_measured_timing_feedback_before_critique(self):
+        short = demo()
+        for line in short["dialogue"]:
+            line["text"] = "No way."
+        provider = DialogueStoryProvider(CostBudget(self.root / "timing-feedback.json", 0))
+        provider._request = Mock(side_effect=[
+            {"candidates": demo_candidates()},
+            short,
+            demo(),
+            {"scores": {k: 9 for k in QUALITY_METRICS}},
+        ])
+        result = provider.generate(excluded_concepts=set())
+        self.assertEqual(result["story_quality"]["status"], "PASSED")
+        self.assertEqual([c.args[1] for c in provider._request.call_args_list], ["candidate_concepts", "dialogue_script", "dialogue_script", "editorial_critique"])
+        rewrite_prompt = provider._request.call_args_list[2].args[0]
+        self.assertIn("DIALOGUE_TIMING_CONTRACT_FAILED", rewrite_prompt)
+        self.assertIn("spoken words", rewrite_prompt)
+        self.assertIn("after normalization", rewrite_prompt)
+        self.assertEqual(provider.budget.events[0]["dialogue_word_count"], 40)
+        self.assertLess(provider.budget.events[0]["estimated_dialogue_duration_seconds"], 65)
+
     def test_candidate_request_uses_strict_schema_for_supported_openai_model(self):
         payload = {"candidates": demo_candidates()}
         response = Mock(status_code=200, json=lambda: {"choices": [{"message": {"content": json.dumps(payload)}}], "usage": {"prompt_tokens": 20, "completion_tokens": 40}})
