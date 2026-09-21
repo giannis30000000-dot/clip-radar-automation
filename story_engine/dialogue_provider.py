@@ -37,7 +37,10 @@ class DialogueStoryProvider(ChatStoryProvider):
                 self.budget.update(record, status="SUCCEEDED", usage={k: usage[k] for k in ("prompt_tokens", "completion_tokens") if isinstance(usage.get(k), int)})
                 return result
             except ProviderFailure as exc:
-                self.budget.update(record, status=str(exc))
+                fields = {"status": str(exc)}
+                if exc.detail:
+                    fields["provider_error_type"] = exc.detail
+                self.budget.update(record, **fields)
                 if not exc.retryable:
                     raise
                 if retry + 1 < attempts():
