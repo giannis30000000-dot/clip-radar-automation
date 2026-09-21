@@ -111,6 +111,47 @@ class DialogueTests(unittest.TestCase):
         self.assertEqual([c.args[1] for c in provider._request.call_args_list], ["candidate_concepts", "dialogue_script", "editorial_critique"])
         self.assertEqual(result["story_quality"]["status"], "PASSED")
 
+    def test_candidate_request_uses_strict_schema_for_supported_openai_model(self):
+        payload = {"candidates": demo_candidates()}
+        response = Mock(status_code=200, json=lambda: {"choices": [{"message": {"content": json.dumps(payload)}}], "usage": {"prompt_tokens": 20, "completion_tokens": 40}})
+        session = Mock()
+        session.request.return_value = response
+        provider = DialogueStoryProvider(CostBudget(self.root / "strict-candidate.json", 1), session=session)
+        with patch.dict(os.environ, {"STORY_LLM_API_KEY": "fake-llm-secret", "STORY_LLM_MODEL": "gpt-4.1-mini", "STORY_LLM_BASE_URL": "https://api.openai.com/v1"}):
+            result = provider._request("Return candidates as JSON", "candidate_concepts")
+        request = session.request.call_args.kwargs["json"]
+        self.assertEqual(result, payload)
+        self.assertEqual(request["response_format"]["type"], "json_schema")
+        schema = request["response_format"]["json_schema"]["schema"]
+        self.assertTrue(request["response_format"]["json_schema"]["strict"])
+        self.assertEqual(schema["required"], ["candidates"])
+        self.assertEqual(schema["properties"]["candidates"]["items"]["required"], ["concept", "category", "trope", "scores"])
+        self.assertEqual(provider.budget.requests[0]["status"], "SUCCEEDED")
+
+    def test_candidate_parser_retries_invalid_shape_and_accepts_fenced_json(self):
+        invalid = Mock(status_code=200, json=lambda: {"choices": [{"message": {"content": "{\"candidates\": []}"}}]})
+        valid = Mock(status_code=200, json=lambda: {"choices": [{"message": {"content": "```json\n" + json.dumps({"candidates": demo_candidates()}) + "\n```"}}]})
+        session = Mock()
+        session.request.side_effect = [invalid, valid]
+        provider = DialogueStoryProvider(CostBudget(self.root / "candidate-retry.json", 1), session=session)
+        with patch.dict(os.environ, {"STORY_LLM_API_KEY": "fake-llm-secret", "STORY_LLM_MODEL": "gpt-4.1-mini", "STORY_LLM_BASE_URL": "https://api.openai.com/v1"}):
+            result = provider._request("Return candidates as JSON", "candidate_concepts")
+        self.assertEqual(len(result["candidates"]), 3)
+        self.assertEqual(session.request.call_count, 2)
+        self.assertEqual(provider.budget.requests[0]["status"], "INVALID_STRUCTURED_OUTPUT")
+
+    def test_candidate_schema_falls_back_to_json_object_when_proxy_rejects_schema(self):
+        rejected = Mock(status_code=400, json=lambda: {"error": {"type": "invalid_request_error"}})
+        valid = Mock(status_code=200, json=lambda: {"choices": [{"message": {"content": json.dumps({"candidates": demo_candidates()})}}]})
+        session = Mock()
+        session.request.side_effect = [rejected, valid]
+        provider = DialogueStoryProvider(CostBudget(self.root / "candidate-compat.json", 1), session=session)
+        with patch.dict(os.environ, {"STORY_LLM_API_KEY": "fake-llm-secret", "STORY_LLM_MODEL": "gpt-4.1-mini", "STORY_LLM_BASE_URL": "https://api.openai.com/v1"}):
+            provider._request("Return candidates as JSON", "candidate_concepts")
+        first = session.request.call_args_list[0].kwargs["json"]["response_format"]["type"]
+        second = session.request.call_args_list[1].kwargs["json"]["response_format"]["type"]
+        self.assertEqual((first, second), ("json_schema", "json_object"))
+
     def test_separate_quality_critique_triggers_bounded_rewrite(self):
         provider = DialogueStoryProvider(CostBudget(self.root / "cost.json", 0))
         weak = {k: 9 for k in QUALITY_METRICS}
