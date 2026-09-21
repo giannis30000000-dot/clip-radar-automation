@@ -137,7 +137,9 @@ acceptance or permission to publish it.
 ## Smallest next paid validation
 
 After choosing accessible accounts/voice and setting keys, run one 2-second
-scene plus a short narration sample under a deliberately small explicit budget.
+scene plus one narration sample under a deliberately small explicit budget.
+The voice adapter expects a 60-75-second script. Use a targeted adapter smoke
+test, not the full workflow, which would request every scene.
 Review character style, voice and timing first. Then authorize a complete story
 with a ceiling covering the scene plan and desired retries. No purchase or
 production API request was required for this coding milestone.
@@ -154,6 +156,19 @@ production API request was required for this coding milestone.
 - Workflow YAML parsed; git diff whitespace check passed.
 - Paid API integrations use mocks: no configured credentials were available.
   This proves contracts, fallback and spending controls, not paid output quality.
+- GitHub Actions [run 35613354934](https://github.com/giannis30000000-dot/clip-radar-automation/actions/runs/35613354934)
+  succeeded on implementation commit 0de24aaf54cbc23b14b30bc9126f119383a9bfdf.
+  Inputs: provider_mode=production, max_cost_usd=0. All 66 tests passed on Ubuntu.
+  The unused fridge-witness premise became a 68-second 720x1280 H.264/AAC MP4;
+  all 17 QC checks passed. History restore/save and artifact uploads succeeded.
+- Downloaded and inspected the actual cloud report, cost ledger, logs and contact
+  sheet; decoded the downloaded MP4 again locally without errors. Three explicit
+  missing-configuration fallbacks, zero requests, actual/estimated spend $0,
+  publishing_enabled=false and live_request_sent=false.
+- [Full cloud review package](https://github.com/giannis30000000-dot/clip-radar-automation/actions/runs/35613354934/artifacts/10644299891)
+  includes final MP4, scene cards, audio, subtitles, review frames, metadata, QC
+  and cost reports. Artifact retention is 30 days. This is still a development
+  visual/voice sample, not the first production-quality paid video.
 
 ## Exact changed files
 
