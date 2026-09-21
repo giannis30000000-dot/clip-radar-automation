@@ -81,6 +81,13 @@ class DialogueTests(unittest.TestCase):
         self.assertTrue(65 <= s["estimated_voice_duration_seconds"] <= 75)
         self.assertEqual(evaluate_story(s)["status"], "PASSED")
 
+    def test_normalization_derives_hook_from_first_dialogue_line(self):
+        s = demo()
+        s["hook"] = "A different hook"
+        normalized = normalize_dialogue(s)
+        self.assertEqual(normalized["hook"], normalized["dialogue"][0]["text"])
+        self.assertEqual(evaluate_story(normalized)["status"], "PASSED")
+
     def test_schema_rejects_unknown_speaker_listener_and_overlapping_line(self):
         for mutate in (lambda s: s["dialogue"][0].update(speaker_id="unknown"), lambda s: s["dialogue"][0].update(listeners=["unknown"]), lambda s: s["dialogue"][1].update(intended_start_time=0), lambda s: s["scenes"][0].update(active_speaker="ben")):
             s = demo()

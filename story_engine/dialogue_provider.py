@@ -242,7 +242,7 @@ class DialogueStoryProvider(ChatStoryProvider):
                 "At 165 words per minute plus brief turn pauses, this must mechanically normalize to 65-75 seconds. "
                 "Before returning JSON, self-check the word count and add meaningful reaction/escalation turns if it is short; tighten redundant turns if it is long. Never pad, repeat a gag, slow speech or add dead air. "
                 "2-4 speaking characters; optional narrator ID narrator with under 20% of words. New cast/world/style allowed every video. "
-                "First line is ONLY a 4-5-word immediate hook. Then goal, conflict, causal escalation, at least three reaction/punchline beats and final earned payoff. "
+                "First dialogue line is ONLY a 4-5-word immediate hook; set hook character-for-character equal to dialogue[0].text, including punctuation and capitalization. Then goal, conflict, causal escalation, at least three reaction/punchline beats and final earned payoff. "
                 "Natural short character-specific turns, no exposition dumps or generic narration. 8-12 contiguous scenes, each 1-3 dialogue lines and under 10 seconds; every line has at least two spoken words. "
                 "Return JSON with title, hook (exact opening text), ending_type=standalone unless a sequel truly improves it, sequel_possible:boolean, "
                 "characters:[{character_id,name,personality,speaking_style,visual_description,description,voice_profile_hint}], "

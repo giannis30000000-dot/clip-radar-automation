@@ -73,6 +73,10 @@ def normalize_dialogue(story):
     story.pop("hook_duration_seconds", None)
     story.pop("story_quality", None)
     story.pop("voice_assignments", None)  # Account-specific IDs come from configuration only.
+    # The opening hook is a derived field; keeping it identical to the first
+    # spoken line prevents a harmless model paraphrase from breaking the
+    # existing hook/opening quality check.
+    story["hook"] = story["dialogue"][0]["text"]
     cursor = 0.0
     for index, line in enumerate(story["dialogue"], 1):
         duration = round(estimate_duration(line["text"]) + .12, 3)
