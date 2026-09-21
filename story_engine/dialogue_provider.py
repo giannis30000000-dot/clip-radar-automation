@@ -1,6 +1,7 @@
 """Candidate selection, script writing and separate editorial critique; bounded."""
 import json
 import os
+import time
 import uuid
 
 from .costs import sanitize
@@ -39,6 +40,11 @@ class DialogueStoryProvider(ChatStoryProvider):
                 self.budget.update(record, status=str(exc))
                 if not exc.retryable:
                     raise
+                if retry + 1 < attempts():
+                    # Give transient 429/5xx responses a bounded pause; the
+                    # reservation already protects the per-video ceiling.
+                    delay = max(0.0, min(30.0, float(os.getenv("STORY_PROVIDER_RETRY_DELAY_SECONDS", "5"))))
+                    time.sleep(delay * (retry + 1))
             except (ValueError, KeyError, TypeError, IndexError, AttributeError):
                 self.budget.update(record, status="INVALID_STRUCTURED_OUTPUT")
         raise ProviderFailure("DIALOGUE_JSON_ATTEMPTS_EXHAUSTED")
