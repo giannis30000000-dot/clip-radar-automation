@@ -176,6 +176,33 @@ class DialogueTests(unittest.TestCase):
         self.assertIn("MANDATORY CHARACTER-SCHEMA REPAIR", rewrite_prompt)
         self.assertIn("voice_profile_hint", rewrite_prompt)
 
+    def test_visual_bible_failure_gets_targeted_rewrite_instruction(self):
+        incomplete = demo()
+        complete = demo()
+        for character in incomplete["characters"]:
+            character["visual_identity"] = {}
+        for character, color in zip(complete["characters"], ("amber", "blue", "silver")):
+            character["visual_identity"] = {
+                "appearance": "robot",
+                "proportions": "round",
+                "clothing_accessories": "scarf",
+                "colors": color,
+                "facial_traits": "oval eyes",
+            }
+        provider = DialogueStoryProvider(CostBudget(self.root / "visual-bible-feedback.json", 0))
+        provider._request = Mock(side_effect=[
+            {"candidates": demo_candidates()},
+            incomplete,
+            complete,
+            {"scores": {k: 9 for k in QUALITY_METRICS}},
+        ])
+        with patch.dict(os.environ, {"STORY_REFERENCE_PROVIDER": "runway", "STORY_VOICE_POOL": '["voiceA", "voiceB", "voiceC"]'}):
+            result = provider.generate(excluded_concepts=set())
+        self.assertEqual(result["story_quality"]["status"], "PASSED")
+        rewrite_prompt = provider._request.call_args_list[2].args[0]
+        self.assertIn("MANDATORY VISUAL-BIBLE REPAIR", rewrite_prompt)
+        self.assertIn("facial_traits", rewrite_prompt)
+
     def test_candidate_request_uses_strict_schema_for_supported_openai_model(self):
         payload = {"candidates": demo_candidates()}
         response = Mock(status_code=200, json=lambda: {"choices": [{"message": {"content": json.dumps(payload)}}], "usage": {"prompt_tokens": 20, "completion_tokens": 40}})
