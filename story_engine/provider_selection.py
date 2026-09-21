@@ -31,9 +31,14 @@ class FallbackProvider:
     def synthesize(self, *args):
         return self._call("synthesize", *args)
 
+    def rewrite(self, story, feedback):
+        # Never replace a reserved premise with a different fallback story.
+        return self.production.rewrite(story, feedback)
+
 
 def production_provider(kind, default, budget, history=None):
-    from .llm_provider import ChatStoryProvider
+    from .dialogue_provider import DialogueStoryProvider
+    from .dialogue_demo import DialogueDemoProvider
     from .runway_provider import RunwayVisualProvider
     from .elevenlabs_provider import ElevenLabsVoiceProvider
 
@@ -42,12 +47,16 @@ def production_provider(kind, default, budget, history=None):
         "visual": ("RUNWAYML_API_SECRET",),
         "voice": ("ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID"),
     }
+    if kind == "script":
+        default = DialogueDemoProvider
+    if kind == "voice" and (os.getenv("STORY_VOICE_MAP") or os.getenv("STORY_VOICE_POOL")):
+        requirements["voice"] = ("ELEVENLABS_API_KEY",)
     missing = [name for name in requirements[kind] if not os.getenv(name, "").strip()]
     if missing:
         budget.event(kind, "DEVELOPMENT_FALLBACK", missing_configuration=missing)
         return default()
     factories = {
-        "script": lambda: ChatStoryProvider(budget, history=history),
+        "script": lambda: DialogueStoryProvider(budget, history=history),
         "visual": lambda: RunwayVisualProvider(budget),
         "voice": lambda: ElevenLabsVoiceProvider(budget),
     }

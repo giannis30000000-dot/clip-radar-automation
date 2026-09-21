@@ -96,6 +96,8 @@ def prop_icon(image, kind, x, y, accent):
 
 class DevelopmentVisualProvider:
     def create(self, story: dict, scene: dict, directory: Path) -> VisualAsset:
+        if "dialogue" in story:
+            return dialogue_card(story, scene, directory)
         directory.mkdir(parents=True, exist_ok=True)
         number = scene["scene_number"]
         art = story.get("art_direction", {})
@@ -134,3 +136,31 @@ class DevelopmentVisualProvider:
         path = directory / f"scene_{number:02}.png"
         image.convert("RGB").save(path)
         return VisualAsset(path, "image", "deterministic-pillow-storyboard")
+
+
+def dialogue_card(story, scene, directory):
+    """Clearly labeled cast-neutral blocking cards, not generated production art."""
+    directory.mkdir(parents=True, exist_ok=True)
+    image = Image.new("RGB", (720, 1280), PAPER)
+    d = ImageDraw.Draw(image)
+    d.text((50, 75), "CLIP RADAR  /  DIALOGUE STUDY", font=font(24), fill=INK)
+    title = scene.get("headline") or story["title"]
+    d.multiline_text((360, 215), "\n".join(textwrap.wrap(title, 23)), font=font(36), fill=INK, anchor="mm", align="center")
+    present = [c for c in story["characters"] if c["character_id"] in scene["characters_present"]]
+    colors = ("#74D8CF", "#FFC766", "#A8B7FF", "#F3A5C0", "#B8DEAC")
+    for index, c in enumerate(present):
+        x = int((index + .5) * 620 / len(present) + 50)
+        y = 540 + (scene["scene_number"] % 3 - 1) * 24 * (-1 if index % 2 else 1)
+        accent = colors[index % len(colors)]
+        d.rounded_rectangle((x-73, y-95, x+73, y+135), 32, fill=accent, outline=INK, width=5)
+        for ex in (-27, 27):
+            d.ellipse((x+ex-6, y-35, x+ex+6, y-19), fill=INK)
+        d.line((x-22, y+23, x+22, y+23+(scene["scene_number"] % 3)*5), fill=INK, width=5)
+        d.text((x, y+174), c["name"][:15], font=font(22), fill=INK, anchor="mm")
+    action = scene["action_direction"]
+    d.multiline_text((360, 810), "\n".join(textwrap.wrap(action, 46)[:3]), font=font(23, False), fill=INK, anchor="mm", align="center")
+    d.rounded_rectangle((55, 937, 665, 1105), 24, fill=INK)
+    d.text((50, 1180), f"SCENE {scene['scene_number']:02}   •   PLACEHOLDER BLOCKING", font=font(20), fill=INK)
+    path = directory / f"scene_{scene['scene_number']:02}.png"
+    image.save(path)
+    return VisualAsset(path, "image", "deterministic-pillow-storyboard")

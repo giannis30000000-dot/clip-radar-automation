@@ -57,4 +57,7 @@ def validate_story(story: dict) -> dict:
     require(story["full_script"].startswith(story["hook"]), "hook must open the narration")
     metadata = story.get("platform_metadata")
     require(isinstance(metadata, dict) and all(isinstance(metadata.get(p), dict) and metadata[p].get("caption") for p in ("instagram", "tiktok", "youtube")), "platform metadata required")
+    if story.get("schema_version") == 2 or "dialogue" in story:
+        from .dialogue import validate_dialogue
+        validate_dialogue(story)
     return story

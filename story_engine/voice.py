@@ -63,6 +63,9 @@ def trimmed_pcm(path: Path) -> tuple[bytes, int]:
 
 class DevelopmentVoiceProvider:
     def synthesize(self, story: dict, directory: Path) -> tuple[Path, list[dict], dict]:
+        if "dialogue" in story:
+            from .dialogue_voice import synthesize_dialogue
+            return synthesize_dialogue(story, directory)
         directory.mkdir(parents=True, exist_ok=True)
         segments = []
         for scene in story["scenes"]:

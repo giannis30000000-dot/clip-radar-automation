@@ -171,11 +171,16 @@ def inspect_story_final(path: Path, story_path: Path) -> dict[str, Any]:
         data = media_summary(path)
         report["media"] = data
         duration = data["duration"]
+        minimum_duration = 60
+        if "dialogue" in story:
+            from story_engine.dialogue import duration_policy, evaluate_story
+            minimum_duration = duration_policy()["minimum"]
+            checks["story_quality"] = evaluate_story(story)["status"] == "PASSED"
         checks.update({
             "valid_mp4": path.suffix.lower() == ".mp4" and b"ftyp" in path.read_bytes()[:64],
             "vertical_canvas": (data["width"], data["height"]) in {(720, 1280), (1080, 1920)},
             "video_audio": data["has_video"] and data["has_audio"],
-            "duration": 60 <= duration <= 75 and abs(duration - story["actual_voice_duration_seconds"]) < .15,
+            "duration": minimum_duration <= duration <= 75 and abs(duration - story["actual_voice_duration_seconds"]) < .15,
             "manifest_identity": manifest["story_id"] == story["story_id"] and manifest["mode"] == "ORIGINAL_STORY_MODE",
         })
         subtitles = manifest["subtitles"]
@@ -184,6 +189,9 @@ def inspect_story_final(path: Path, story_path: Path) -> dict[str, Any]:
         checks["captions_complete"] = bool(captions) and normalize(" ".join(c["text"] for c in captions)) == normalize(story["full_script"])
         checks["caption_timing"] = bool(captions) and all(0 <= c["start"] < c["end"] <= duration + .05 for c in captions) and all(b["start"] >= a["end"] - .011 for a, b in zip(captions, captions[1:]))
         checks["caption_sync"] = len(captions) == len(subtitles["entries"]) and all(abs(a["start"] - b["start"]) < .011 and abs(a["end"] - b["end"]) < .011 for a, b in zip(captions, subtitles["entries"]))
+        if "dialogue" in story:
+            lines = {l["order"]: l for l in story["dialogue"]}
+            checks["speaker_caption_timing"] = all(c.get("line_order") in lines and c.get("speaker_id") == lines[c["line_order"]]["speaker_id"] and c["start"] >= lines[c["line_order"]]["intended_start_time"] - .02 and c["end"] <= lines[c["line_order"]]["intended_start_time"] + lines[c["line_order"]]["estimated_duration_seconds"] + .02 for c in subtitles["entries"])
         checks["mobile_captions"] = subtitles["caption_layers"] == 1 and subtitles["position"] == {"x": 360, "y": 1060} and subtitles["font_size"] >= 32 and all(len(c["text"].splitlines()) <= 2 and max(map(len, c["text"].splitlines())) <= 24 for c in captions)
         scenes = manifest["scenes"]
         checks["scenes_complete"] = len(scenes) == len(story["scenes"]) and all(

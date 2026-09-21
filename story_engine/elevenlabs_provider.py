@@ -57,6 +57,9 @@ class ElevenLabsVoiceProvider:
         self.session = session or requests.Session()
 
     def synthesize(self, story, directory: Path):
+        if "dialogue" in story:
+            from .dialogue_voice import synthesize_dialogue
+            return synthesize_dialogue(story, directory, production=self)
         directory.mkdir(parents=True, exist_ok=True)
         voice = os.environ["ELEVENLABS_VOICE_ID"]
         if not re.fullmatch(r"[A-Za-z0-9_-]+", voice):

@@ -32,6 +32,9 @@ class NoNewPremise(RuntimeError):
 
 class DemoStoryProvider:
     def generate(self, *, excluded_concepts: set[str], template: str | None = None) -> dict:
+        if template == "dialogue-demo":
+            from .dialogue_demo import DialogueDemoProvider
+            return DialogueDemoProvider().generate(excluded_concepts=excluded_concepts)
         available = [t for t in TEMPLATES if template is None or t["key"] == template]
         if not available:
             raise ValueError(f"unknown story template: {template}")
@@ -78,6 +81,9 @@ def load_provider(kind: str, default, *, budget=None, history=None):
     configured = os.getenv(alias) or os.getenv(f"STORY_{kind.upper()}_PROVIDER", "demo")
     configured = configured.strip()
     if configured in {"demo", "development"}:
+        if kind == "script" and os.getenv("STORY_FORMAT") == "dialogue":
+            from .dialogue_demo import DialogueDemoProvider
+            return DialogueDemoProvider()
         return default()
     if configured == "production":
         if budget is None:

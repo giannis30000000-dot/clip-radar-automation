@@ -79,6 +79,7 @@ class StoryHistory:
         data["stories"][story["story_id"]] = {
             "story_id": story["story_id"], "title": story["title"], "concept": story["concept"],
             "concept_fingerprint": fingerprint, "characters": story["characters"],
+            "content_category": story.get("content_category"), "trope": story.get("trope"),
             "date_generated": datetime.now(timezone.utc).isoformat(), "output_path": str(output),
             "status": "GENERATING", "qc_result": None, "publication_state": "REVIEW_REQUIRED",
             "analytics": {}, "generation_attempts": 1,

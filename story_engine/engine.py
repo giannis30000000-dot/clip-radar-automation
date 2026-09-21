@@ -18,6 +18,8 @@ from .schema import validate_story
 from .visuals import DevelopmentVisualProvider
 from .voice import DevelopmentVoiceProvider
 from .costs import BudgetExceeded, CostBudget, sanitize
+from .dialogue import evaluate_story, max_attempts
+from .provider_http import ProviderFailure
 
 
 def generate_story_video(
@@ -49,7 +51,7 @@ def generate_story_video(
         print(f"story | {value}", flush=True)
         return result
 
-    story, folder = None, None
+    story, folder, provider = None, None, None
     budget = None
     try:
         with history.locked():
@@ -81,12 +83,46 @@ def generate_story_video(
                 metadata_path = folder / "story.json"
                 write_json(metadata_path, story)
                 history.update(story["story_id"], metadata_path=str(metadata_path), output_path=str(folder / "final.mp4"))
+                prepared_voice = None
+                from .runway_provider import RunwayVisualProvider
+                production_visual = (os.getenv("VISUAL_PROVIDER") or os.getenv("STORY_VISUAL_PROVIDER")) == "production"
+                production_visual = production_visual or isinstance(visual_provider, RunwayVisualProvider) or isinstance(getattr(visual_provider, "production", None), RunwayVisualProvider)
+                if "dialogue" in story or production_visual:
+                    voice = voice_provider or load_provider("voice", DevelopmentVoiceProvider, budget=budget)
+                    for attempt in range(max_attempts()):
+                        quality_gate = evaluate_story(story)
+                        if quality_gate["status"] == "PASSED":
+                            status("SYNTHESIZING_VOICE", story_id=story["story_id"], title=story["title"])
+                            prepared_voice = voice.synthesize(story, folder / "audio" / f"attempt_{attempt+1}")
+                            quality_gate = evaluate_story(story)
+                        write_json(folder / f"story_quality_attempt_{attempt+1}.json", quality_gate)
+                        if quality_gate["status"] == "PASSED":
+                            story["story_quality"] = quality_gate
+                            break
+                        prepared_voice = None
+                        if attempt + 1 == max_attempts() or not hasattr(provider, "rewrite"):
+                            break
+                        try:
+                            revised = provider.rewrite(story, json.dumps(quality_gate))
+                            if revised["concept"] != story["concept"]:
+                                raise ValueError("A timing rewrite must retain the reserved concept")
+                            revised["story_id"] = story["story_id"]
+                            story = validate_story(revised)
+                        except ProviderFailure:
+                            break
+                    write_json(folder / "story_quality.json", quality_gate)
+                    write_json(metadata_path, story)
+                    if quality_gate["status"] != "PASSED":
+                        history.update(story["story_id"], status="REVIEW_REQUIRED", qc_result="NOT_RUN")
+                        return status("REVIEW_REQUIRED", reason="STORY_QUALITY_REJECTED_BEFORE_VISUALS", story_quality=quality_gate)
                 status("CREATING_SCENES", story_id=story["story_id"], title=story["title"])
                 visual = visual_provider or load_provider("visual", DevelopmentVisualProvider, budget=budget)
                 assets = [visual.create(story, scene, folder / "scenes") for scene in story["scenes"]]
-                status("SYNTHESIZING_VOICE", story_id=story["story_id"], title=story["title"])
-                voice = voice_provider or load_provider("voice", DevelopmentVoiceProvider, budget=budget)
-                audio, captions, voice_metadata = voice.synthesize(story, folder / "audio")
+                if prepared_voice is None:
+                    status("SYNTHESIZING_VOICE", story_id=story["story_id"], title=story["title"])
+                    voice = voice_provider or load_provider("voice", DevelopmentVoiceProvider, budget=budget)
+                    prepared_voice = voice.synthesize(story, folder / "audio")
+                audio, captions, voice_metadata = prepared_voice
                 story["generation"]["voice"] = voice_metadata
                 story["generation"]["development_visuals"] = any(asset.provider == "deterministic-pillow-storyboard" for asset in assets)
                 story["generation"]["provider_events"] = budget.events

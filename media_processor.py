@@ -148,8 +148,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             # lower safe zone across ffmpeg/libass versions.
             caption = caption.replace("{", "(").replace("}", ")").replace("\\", "\\\\").replace("\n", r"\N")
             caption = f"{{\\an2\\pos({int(position[0])},{int(position[1])})}}" + caption
+            color = entry.get("speaker_color", "")
+            if re.fullmatch(r"[A-Fa-f0-9]{6}", color):
+                caption = "{\\c&H" + color + "&}" + caption
+            speaker = re.sub(r"[^a-zA-Z0-9_-]", "", entry.get("speaker_id", ""))[:40]
             handle.write(
-                f"Dialogue: 0,{ass_timestamp(entry['start'])},{ass_timestamp(entry['end'])},ClipRadar,,0,0,0,,{caption}\n"
+                f"Dialogue: 0,{ass_timestamp(entry['start'])},{ass_timestamp(entry['end'])},ClipRadar,{speaker},0,0,0,,{caption}\n"
             )
 
 
