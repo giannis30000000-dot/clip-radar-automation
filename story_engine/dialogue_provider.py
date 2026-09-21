@@ -1,6 +1,7 @@
 """Candidate selection, script writing and separate editorial critique; bounded."""
 import json
 import os
+import re
 import time
 import uuid
 
@@ -107,6 +108,31 @@ def _require_production_timing(story):
     return word_count, duration
 
 
+def _timing_repair_instruction(feedback):
+    if "DIALOGUE_TIMING_CONTRACT_FAILED" not in feedback:
+        return ""
+    match = re.search(r"(\d+) spoken words normalize to ([0-9.]+)s", feedback)
+    if not match:
+        return (
+            "This is a mandatory timing repair after a rejected draft. Write a complete replacement, not a summary or outline. "
+            "Aim for approximately 190 spoken words across 20-23 meaningful turns. "
+        )
+    previous_words = int(match.group(1))
+    delta = 190 - previous_words
+    if delta > 0:
+        adjustment = f"add about {delta} meaningful words"
+    elif delta < 0:
+        adjustment = f"trim about {-delta} redundant words"
+    else:
+        adjustment = "keep the dialogue word count nearly unchanged"
+    return (
+        f"MANDATORY TIMING REPAIR: the previous complete draft measured {previous_words} spoken words and {match.group(2)} seconds. "
+        "Write a complete replacement, not a summary or outline, targeting 190 spoken words (188-192 acceptable) across 20-23 meaningful turns; "
+        f"{adjustment}. If short, add one causal reaction or payoff beat; if long, combine redundant reactions. "
+        "Do not repeat the same short structure, pad, slow speech or add dead air. "
+    )
+
+
 class DialogueStoryProvider(ChatStoryProvider):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -198,16 +224,10 @@ class DialogueStoryProvider(ChatStoryProvider):
                     "Every visual_prompt starts with the important physical action, camera directions 2-5 words. "
                     "No visible text, signage, logos or UI. Favor medium/wide expressive acting and listener reactions; no mouth closeups or precise lip-sync. "
                 )
-            timing_repair = ""
-            if "DIALOGUE_TIMING_CONTRACT_FAILED" in feedback:
-                timing_repair = (
-                    "This is a mandatory timing repair after a rejected draft. Write a complete replacement, not a summary or outline. "
-                    "The previous measured duration is included below; correct it by adding meaningful causal reactions, escalation and payoff turns. "
-                    "Do not repeat the same short structure. "
-                )
+            timing_repair = _timing_repair_instruction(feedback)
             prompt = (
                 f"Write the selected concept as a {policy['minimum']}-75 second DIALOGUE-FIRST skit. Default aim 65-75s. "
-                "Hard timing contract: return 185-195 spoken dialogue words across 20-23 meaningful turns; count only dialogue[].text, not action or visual fields. "
+                "Hard timing contract: return 188-192 spoken dialogue words across 20-23 meaningful turns; count only dialogue[].text, not action or visual fields. "
                 "At 165 words per minute plus brief turn pauses, this must mechanically normalize to 65-75 seconds. "
                 "Before returning JSON, self-check the word count and add meaningful reaction/escalation turns if it is short; tighten redundant turns if it is long. Never pad, repeat a gag, slow speech or add dead air. "
                 "2-4 speaking characters; optional narrator ID narrator with under 20% of words. New cast/world/style allowed every video. "
