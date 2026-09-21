@@ -198,9 +198,16 @@ class DialogueStoryProvider(ChatStoryProvider):
                     "Every visual_prompt starts with the important physical action, camera directions 2-5 words. "
                     "No visible text, signage, logos or UI. Favor medium/wide expressive acting and listener reactions; no mouth closeups or precise lip-sync. "
                 )
+            timing_repair = ""
+            if "DIALOGUE_TIMING_CONTRACT_FAILED" in feedback:
+                timing_repair = (
+                    "This is a mandatory timing repair after a rejected draft. Write a complete replacement, not a summary or outline. "
+                    "The previous measured duration is included below; correct it by adding meaningful causal reactions, escalation and payoff turns. "
+                    "Do not repeat the same short structure. "
+                )
             prompt = (
                 f"Write the selected concept as a {policy['minimum']}-75 second DIALOGUE-FIRST skit. Default aim 65-75s. "
-                "Hard timing contract: return 175-195 spoken dialogue words across 18-26 meaningful turns; count only dialogue[].text, not action or visual fields. "
+                "Hard timing contract: return 185-195 spoken dialogue words across 20-23 meaningful turns; count only dialogue[].text, not action or visual fields. "
                 "At 165 words per minute plus brief turn pauses, this must mechanically normalize to 65-75 seconds. "
                 "Before returning JSON, self-check the word count and add meaningful reaction/escalation turns if it is short; tighten redundant turns if it is long. Never pad, repeat a gag, slow speech or add dead air. "
                 "2-4 speaking characters; optional narrator ID narrator with under 20% of words. New cast/world/style allowed every video. "
@@ -213,7 +220,7 @@ class DialogueStoryProvider(ChatStoryProvider):
                 "art_direction:{style,environment}, story_beats:{setup,goal,conflict,escalation:[at least two causal beats],payoff}, "
                 "platform_metadata:{instagram:{caption},tiktok:{caption},youtube:{caption}}. No voice IDs, no existing characters. "
                 + visual_instructions +
-                f"Selected concept: {json.dumps(selected)}. Rewrite feedback: {feedback}"
+                timing_repair + f"Selected concept: {json.dumps(selected)}. Rewrite feedback: {feedback}"
             )
             normalized_story = None
             try:
