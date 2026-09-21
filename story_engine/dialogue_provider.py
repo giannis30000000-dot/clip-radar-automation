@@ -127,7 +127,7 @@ def _timing_repair_instruction(feedback):
         adjustment = "keep the dialogue word count nearly unchanged"
     return (
         f"MANDATORY TIMING REPAIR: the previous complete draft measured {previous_words} spoken words and {match.group(2)} seconds. "
-        "Write a complete replacement, not a summary or outline, targeting 190 spoken words (188-192 acceptable) across 20-23 meaningful turns; "
+        "Write a complete replacement, not a summary or outline, with exactly 10 scenes and exactly 20 dialogue objects (two per scene), targeting 190 spoken words (188-192 acceptable); "
         f"{adjustment}. If short, add one causal reaction or payoff beat; if long, combine redundant reactions. "
         "Do not repeat the same short structure, pad, slow speech or add dead air. "
     )
@@ -238,12 +238,12 @@ class DialogueStoryProvider(ChatStoryProvider):
             scene_repair = _scene_repair_instruction(feedback)
             prompt = (
                 f"Write the selected concept as a {policy['minimum']}-75 second DIALOGUE-FIRST skit. Default aim 65-75s. "
-                "Hard timing contract: return 188-192 spoken dialogue words across 20-23 meaningful turns; count only dialogue[].text, not action or visual fields. "
+                "Hard timing contract: return 188-192 spoken dialogue words across exactly 20 dialogue objects; count only dialogue[].text, not action or visual fields. "
                 "At 165 words per minute plus brief turn pauses, this must mechanically normalize to 65-75 seconds. "
                 "Before returning JSON, self-check the word count and add meaningful reaction/escalation turns if it is short; tighten redundant turns if it is long. Never pad, repeat a gag, slow speech or add dead air. "
                 "2-4 speaking characters; optional narrator ID narrator with under 20% of words. New cast/world/style allowed every video. "
                 "First dialogue line is ONLY a 4-5-word immediate hook; set hook character-for-character equal to dialogue[0].text, including punctuation and capitalization. Then goal, conflict, causal escalation, at least three reaction/punchline beats and final earned payoff. "
-                "Natural short character-specific turns, no exposition dumps or generic narration. 8-12 contiguous scenes, each 1-3 dialogue lines and under 10 seconds; every line has at least two spoken words. "
+                "Use exactly 10 contiguous scenes with exactly 2 dialogue lines per scene: line 1 is 4-5 words and lines 2-20 are conversational 9-11-word turns. No exposition dumps or generic narration; every line has at least two spoken words. "
                 "Return JSON with title, hook (exact opening text), ending_type=standalone unless a sequel truly improves it, sequel_possible:boolean, "
                 "characters:[{character_id,name,personality,speaking_style,visual_description,description,voice_profile_hint}], "
                 "dialogue:[{speaker_id,text,emotion,scene_number,action,listeners:[character_id]}] in playback order, "

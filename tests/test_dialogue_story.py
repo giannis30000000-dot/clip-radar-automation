@@ -137,6 +137,7 @@ class DialogueTests(unittest.TestCase):
         self.assertIn("spoken words", rewrite_prompt)
         self.assertIn("after normalization", rewrite_prompt)
         self.assertIn("targeting 190 spoken words", rewrite_prompt)
+        self.assertIn("exactly 20 dialogue objects", rewrite_prompt)
         self.assertIn("add about 150 meaningful words", rewrite_prompt)
         self.assertEqual(provider.budget.events[0]["dialogue_word_count"], 40)
         self.assertLess(provider.budget.events[0]["estimated_dialogue_duration_seconds"], 65)
