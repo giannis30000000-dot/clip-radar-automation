@@ -67,16 +67,23 @@ class DemoStoryProvider:
         return validate_story(story)
 
 
-def load_provider(kind: str, default):
+def load_provider(kind: str, default, *, budget=None, history=None):
     """Load an explicit module:factory for an installed future provider.
 
     Story adapters implement generate(excluded_concepts, template); visual
     adapters implement create(story, scene, directory). Credentials stay inside
     the adapter and never belong in returned story metadata.
     """
-    configured = os.getenv(f"STORY_{kind.upper()}_PROVIDER", "demo").strip()
-    if configured == "demo":
+    alias = {"script": "STORY_PROVIDER", "visual": "VISUAL_PROVIDER", "voice": "VOICE_PROVIDER"}[kind]
+    configured = os.getenv(alias) or os.getenv(f"STORY_{kind.upper()}_PROVIDER", "demo")
+    configured = configured.strip()
+    if configured in {"demo", "development"}:
         return default()
+    if configured == "production":
+        if budget is None:
+            raise ValueError("Production providers require a shared per-video CostBudget")
+        from .provider_selection import production_provider
+        return production_provider(kind, default, budget, history=history)
     module, separator, factory = configured.partition(":")
     if not separator or not module or not factory:
         raise ValueError(f"STORY_{kind.upper()}_PROVIDER must be demo or module:factory")

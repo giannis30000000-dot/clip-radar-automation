@@ -60,7 +60,7 @@ class StoryHistory:
     def fingerprints(self) -> set[str]:
         return {v["concept_fingerprint"] for v in self.read()["stories"].values()}
 
-    def reserve(self, story: dict, output: Path) -> None:
+    def ensure_new(self, story: dict) -> None:
         data = self.read()
         words = set(re.findall(r"[a-z0-9]+", story["concept"].lower()))
         fingerprint = concept_fingerprint(story["concept"])
@@ -71,6 +71,11 @@ class StoryHistory:
                 raise DuplicatePremise("This premise or a near-identical wording is already in story history.")
         if story["story_id"] in data["stories"]:
             raise DuplicatePremise("story_id already exists")
+
+    def reserve(self, story: dict, output: Path) -> None:
+        self.ensure_new(story)
+        data = self.read()
+        fingerprint = concept_fingerprint(story["concept"])
         data["stories"][story["story_id"]] = {
             "story_id": story["story_id"], "title": story["title"], "concept": story["concept"],
             "concept_fingerprint": fingerprint, "characters": story["characters"],

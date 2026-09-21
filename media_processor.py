@@ -404,6 +404,7 @@ def render_story(story: dict, assets, audio: Path, captions: list[dict], output:
                     # A generated clip may be shorter than narration; hold its
                     # last frame explicitly, and leave the decision in metadata.
                     filters += f",fps=30,tpad=stop_mode=clone:stop_duration={frames/30:.6f}"
+                    filters += ",drawtext=text='CLIP RADAR':fontcolor=white:fontsize=18:borderw=2:bordercolor=black@0.6:x=48:y=80"
                 command = [ffmpeg_binary(), "-v", "error", "-y", *source_args, "-i", str(asset.path.resolve()), "-an", "-vf", filters, "-frames:v", str(frames), "-c:v", "libx264", "-threads", "2", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p", str(segment)]
                 subprocess.run(command, check=True, capture_output=True, timeout=180)
                 measured = media_summary(segment)
@@ -422,8 +423,8 @@ def render_story(story: dict, assets, audio: Path, captions: list[dict], output:
     manifest = {
         "schema_version": 1, "mode": "ORIGINAL_STORY_MODE", "story_id": story["story_id"],
         "duration": duration, "canvas": [720, 1280], "fps": 30, "scenes": scene_reports,
-        "subtitles": {"file": subtitles.name, "count": len(captions), "entries": captions, "caption_layers": 1, "font_size": 38, "position": {"x": 360, "y": 1060}, "timing_basis": "synthesized_phrase_pcm"},
-        "branding": "subtle_scene_footer", "audio": os.path.relpath(audio, output.parent).replace("\\", "/"), "publishing_enabled": False,
+        "subtitles": {"file": subtitles.name, "count": len(captions), "entries": captions, "caption_layers": 1, "font_size": 38, "position": {"x": 360, "y": 1060}, "timing_basis": story.get("generation", {}).get("voice", {}).get("timing_basis", "synthesized_phrase_pcm")},
+        "branding": "subtle_scene_overlay" if any(a.kind == "video" for a in assets) else "subtle_scene_footer", "audio": os.path.relpath(audio, output.parent).replace("\\", "/"), "publishing_enabled": False,
     }
     output.with_suffix(".render.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return manifest

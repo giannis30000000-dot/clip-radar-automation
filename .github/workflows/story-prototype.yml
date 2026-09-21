@@ -2,6 +2,16 @@ name: Clip Radar Original Story Prototype
 
 on:
   workflow_dispatch:
+    inputs:
+      provider_mode:
+        description: Production uses configured providers with free fallback when secrets are absent
+        type: choice
+        options: [development, production]
+        default: development
+      max_cost_usd:
+        description: Explicit per-video paid request ceiling in USD; zero disables paid requests
+        type: string
+        default: '0'
 
 # Manual review only. A daily trigger can be added after prototype acceptance.
 permissions:
@@ -41,7 +51,28 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python -m story_engine.cloud_state restore
-      - name: Generate one review video without service credentials
+      - name: Generate one review video with a hard paid budget
+        env:
+          STORY_PROVIDER: ${{ inputs.provider_mode }}
+          VISUAL_PROVIDER: ${{ inputs.provider_mode }}
+          VOICE_PROVIDER: ${{ inputs.provider_mode }}
+          CLIP_RADAR_MAX_COST_USD_PER_VIDEO: ${{ inputs.max_cost_usd }}
+          STORY_LLM_API_KEY: ${{ secrets.STORY_LLM_API_KEY }}
+          RUNWAYML_API_SECRET: ${{ secrets.RUNWAYML_API_SECRET }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_VOICE_ID: ${{ vars.ELEVENLABS_VOICE_ID }}
+          STORY_LLM_BASE_URL: ${{ vars.STORY_LLM_BASE_URL || 'https://api.openai.com/v1' }}
+          STORY_LLM_MODEL: ${{ vars.STORY_LLM_MODEL || 'gpt-4.1-mini' }}
+          STORY_LLM_MAX_OUTPUT_TOKENS: ${{ vars.STORY_LLM_MAX_OUTPUT_TOKENS || '6000' }}
+          STORY_LLM_INPUT_USD_PER_MILLION: ${{ vars.STORY_LLM_INPUT_USD_PER_MILLION }}
+          STORY_LLM_OUTPUT_USD_PER_MILLION: ${{ vars.STORY_LLM_OUTPUT_USD_PER_MILLION }}
+          RUNWAY_MODEL: ${{ vars.RUNWAY_MODEL || 'gen4.5' }}
+          RUNWAY_RATIO: ${{ vars.RUNWAY_RATIO || '720:1280' }}
+          RUNWAY_MAX_POLLS: ${{ vars.RUNWAY_MAX_POLLS || '60' }}
+          RUNWAY_USD_PER_SECOND: ${{ vars.RUNWAY_USD_PER_SECOND }}
+          ELEVENLABS_MODEL: ${{ vars.ELEVENLABS_MODEL || 'eleven_multilingual_v2' }}
+          STORY_PROVIDER_MAX_ATTEMPTS: ${{ vars.STORY_PROVIDER_MAX_ATTEMPTS || '2' }}
+          ELEVENLABS_USD_PER_1K_CHARACTERS: ${{ vars.ELEVENLABS_USD_PER_1K_CHARACTERS }}
         run: python orchestrator.py
       - name: Verify result and publish-disabled contract
         run: |
@@ -51,7 +82,7 @@ jobs:
           summary = json.loads(Path('output/stories/run_summary.json').read_text())
           assert summary['publishing_enabled'] is False
           assert summary['live_request_sent'] is False
-          assert summary['status'] in {'READY_FOR_REVIEW', 'REVIEW_REQUIRED', 'NO_NEW_PREMISE'}
+          assert summary['status'] in {'READY_FOR_REVIEW', 'REVIEW_REQUIRED', 'NO_NEW_PREMISE', 'BUDGET_EXCEEDED'}
           if summary['status'] == 'READY_FOR_REVIEW':
               assert Path(summary['final']).is_file()
               assert summary['qc']['status'] == 'QUALITY_CHECK_PASSED'

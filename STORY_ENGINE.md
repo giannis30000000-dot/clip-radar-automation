@@ -1,5 +1,9 @@
 # Original story engine
 
+Production adapters and budget controls are now available as optional upgrades;
+see [PRODUCTION_PROVIDERS.md](PRODUCTION_PROVIDERS.md). Development remains the
+default. Historical prototype details below describe the no-paid-API path.
+
 This is a working review prototype, using three original authored comedy
 templates, deterministic illustrated placeholder scenes and offline development
 speech. It does not claim to be a production AI video generator or to have
@@ -55,7 +59,7 @@ A future model adapter can replace generation without replacing the orchestrator
 
 STORY_SCRIPT_PROVIDER, STORY_VISUAL_PROVIDER, and STORY_VOICE_PROVIDER
 default to demo, or accept an installed module:factory implementation.
-There is no bundled paid LLM adapter or hidden API fallback. Voice providers
+The production adapters are opt-in; no hidden paid API fallback exists. Voice providers
 implement synthesize(story, directory) returning (wav_path, captions, metadata) and
 update the story's measured scene/voice timing. See voice.py for the contract.
 Provider credentials must stay inside the adapter, never in metadata.
@@ -89,7 +93,7 @@ remains a normal, explicitly labelled result. Real setup/render/state errors
 remain errors, so a green workflow is not a substitute for checking QC status.
 
 GitHub Actions uses ffmpeg, eSpeak NG and Python on a hosted Linux runner.
-No PC, Twitch, Cloudinary, Buffer, Metricool or paid AI service is involved.
+The default development run needs no PC, Twitch, Cloudinary, Buffer, Metricool or paid AI service.
 One concurrency group serializes story runs. History is restored/saved through
 the repository token on a dedicated clip-radar-story-state branch, rather than
 depending on an evictable Actions cache. State writes use the previous file SHA
