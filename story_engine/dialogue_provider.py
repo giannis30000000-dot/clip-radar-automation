@@ -45,6 +45,73 @@ def candidate_response_schema():
     }
 
 
+def dialogue_response_schema():
+    """Strict production script shape; timing and quality remain locally enforced."""
+    character_fields = ["character_id", "name", "personality", "speaking_style", "visual_description", "description", "voice_profile_hint", "visual_identity"]
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["title", "hook", "ending_type", "sequel_possible", "characters", "dialogue", "scenes", "art_direction", "story_beats", "platform_metadata"],
+        "properties": {
+            "title": {"type": "string"},
+            "hook": {"type": "string"},
+            "ending_type": {"type": "string", "enum": ["standalone", "cliffhanger"]},
+            "sequel_possible": {"type": "boolean"},
+            "characters": {
+                "type": "array",
+                "items": {
+                    "type": "object", "additionalProperties": False, "required": character_fields,
+                    "properties": {
+                        key: {"type": "string"} for key in character_fields[:-1]
+                    } | {
+                        "visual_identity": {
+                            "type": "object", "additionalProperties": False,
+                            "required": ["appearance", "proportions", "clothing_accessories", "colors", "facial_traits"],
+                            "properties": {key: {"type": "string"} for key in ("appearance", "proportions", "clothing_accessories", "colors", "facial_traits")},
+                        }
+                    },
+                },
+            },
+            "dialogue": {
+                "type": "array",
+                "items": {
+                    "type": "object", "additionalProperties": False,
+                    "required": ["speaker_id", "text", "emotion", "scene_number", "action", "listeners"],
+                    "properties": {
+                        "speaker_id": {"type": "string"}, "text": {"type": "string"}, "emotion": {"type": "string"},
+                        "scene_number": {"type": "integer"}, "action": {"type": "string"},
+                        "listeners": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+            },
+            "scenes": {
+                "type": "array",
+                "items": {
+                    "type": "object", "additionalProperties": False,
+                    "required": ["scene_number", "characters_present", "visual_description", "visual_prompt", "action_direction", "reaction_direction", "camera_direction", "sound_effect_hint", "background_music_mood", "transition_hint", "payoff_moment"],
+                    "properties": {
+                        "scene_number": {"type": "integer"}, "characters_present": {"type": "array", "items": {"type": "string"}},
+                        "visual_description": {"type": "string"}, "visual_prompt": {"type": "string"},
+                        "action_direction": {"type": "string"}, "reaction_direction": {"type": "string"},
+                        "camera_direction": {"type": "string"}, "sound_effect_hint": {"type": "string"},
+                        "background_music_mood": {"type": "string"}, "transition_hint": {"type": "string"},
+                        "payoff_moment": {"type": "boolean"},
+                    },
+                },
+            },
+            "art_direction": {"type": "object", "additionalProperties": False, "required": ["style", "environment"], "properties": {"style": {"type": "string"}, "environment": {"type": "string"}}},
+            "story_beats": {
+                "type": "object", "additionalProperties": False, "required": ["setup", "goal", "conflict", "escalation", "payoff"],
+                "properties": {"setup": {"type": "string"}, "goal": {"type": "string"}, "conflict": {"type": "string"}, "escalation": {"type": "array", "items": {"type": "string"}}, "payoff": {"type": "string"}},
+            },
+            "platform_metadata": {
+                "type": "object", "additionalProperties": False, "required": ["instagram", "tiktok", "youtube"],
+                "properties": {platform: {"type": "object", "additionalProperties": False, "required": ["caption"], "properties": {"caption": {"type": "string"}}} for platform in ("instagram", "tiktok", "youtube")},
+            },
+        },
+    }
+
+
 def _supports_candidate_schema(base, model):
     if base != "https://api.openai.com/v1":
         return False
@@ -186,13 +253,18 @@ class DialogueStoryProvider(ChatStoryProvider):
         maximum = max(2000, min(12000, int(os.getenv("STORY_LLM_MAX_OUTPUT_TOKENS", "6000"))))
         messages = [{"role": "system", "content": "You are an original short-form dialogue comedy writer/editor. Return a valid JSON object, never markdown. No franchises or copied jokes."}, {"role": "user", "content": prompt}]
         bound = len(json.dumps(messages, ensure_ascii=False).encode()) + 256
-        strict_schema = stage == "candidate_concepts" and _supports_candidate_schema(base, model)
+        strict_schema = stage in {"candidate_concepts", "dialogue_script"} and _supports_candidate_schema(base, model)
         for retry in range(attempts()):
             record = self.budget.reserve("chat-completions", model, (bound * input_rate + maximum * output_rate) / 1_000_000, retry=retry, stage=stage)
             try:
                 response_format = {"type": "json_object"}
                 if strict_schema:
-                    response_format = {"type": "json_schema", "json_schema": {"name": "clip_radar_candidate_concepts", "strict": True, "schema": candidate_response_schema()}}
+                    schema_name, schema = (
+                        ("clip_radar_candidate_concepts", candidate_response_schema())
+                        if stage == "candidate_concepts"
+                        else ("clip_radar_dialogue_script", dialogue_response_schema())
+                    )
+                    response_format = {"type": "json_schema", "json_schema": {"name": schema_name, "strict": True, "schema": schema}}
                 response = request_json(self.session, "POST", base + "/chat/completions", headers={"Authorization": "Bearer " + os.environ["STORY_LLM_API_KEY"]}, json={"model": model, "messages": messages, "response_format": response_format, "max_completion_tokens": maximum})
                 message = response["choices"][0]["message"]
                 if message.get("refusal"):

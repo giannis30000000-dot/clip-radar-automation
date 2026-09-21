@@ -244,6 +244,21 @@ class DialogueTests(unittest.TestCase):
         second = session.request.call_args_list[1].kwargs["json"]["response_format"]["type"]
         self.assertEqual((first, second), ("json_schema", "json_object"))
 
+    def test_dialogue_request_uses_strict_schema_for_supported_openai_model(self):
+        response = Mock(status_code=200, json=lambda: {"choices": [{"message": {"content": json.dumps(demo())}}], "usage": {"prompt_tokens": 20, "completion_tokens": 40}})
+        session = Mock()
+        session.request.return_value = response
+        provider = DialogueStoryProvider(CostBudget(self.root / "strict-dialogue.json", 1), session=session)
+        with patch.dict(os.environ, {"STORY_LLM_API_KEY": "fake-llm-secret", "STORY_LLM_MODEL": "gpt-4.1-mini", "STORY_LLM_BASE_URL": "https://api.openai.com/v1"}):
+            provider._request("Return the complete dialogue story as JSON", "dialogue_script")
+        request = session.request.call_args.kwargs["json"]
+        self.assertEqual(request["response_format"]["type"], "json_schema")
+        schema = request["response_format"]["json_schema"]["schema"]
+        self.assertTrue(request["response_format"]["json_schema"]["strict"])
+        self.assertIn("characters", schema["required"])
+        self.assertIn("visual_identity", schema["properties"]["characters"]["items"]["required"])
+        self.assertIn("payoff_moment", schema["properties"]["scenes"]["items"]["required"])
+
     def test_separate_quality_critique_triggers_bounded_rewrite(self):
         provider = DialogueStoryProvider(CostBudget(self.root / "cost.json", 0))
         weak = {k: 9 for k in QUALITY_METRICS}
