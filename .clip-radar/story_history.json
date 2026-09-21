@@ -42,6 +42,27 @@
       "analytics": {},
       "generation_attempts": 1,
       "metadata_path": "/home/runner/work/clip-radar-automation/clip-radar-automation/output/stories/moon-landlord/story.json"
+    },
+    "fridge-witness": {
+      "story_id": "fridge-witness",
+      "title": "My Fridge Joined Witness Protection",
+      "concept": "A smart fridge witnesses a midnight cheese theft and enters witness protection inside its owner's kitchen.",
+      "concept_fingerprint": "9dc2324a7c6839154b322739554c1e59cce395155bc5beb5a375b15c6b33bdb8",
+      "characters": [
+        {
+          "character_id": "frank",
+          "name": "Frank",
+          "description": "Recurring fictional fridge with absurdly human ambitions."
+        }
+      ],
+      "date_generated": "2026-09-21T14:37:35.102644+00:00",
+      "output_path": "/home/runner/work/clip-radar-automation/clip-radar-automation/output/stories/fridge-witness/final.mp4",
+      "status": "READY_FOR_REVIEW",
+      "qc_result": "QUALITY_CHECK_PASSED",
+      "publication_state": "REVIEW_REQUIRED",
+      "analytics": {},
+      "generation_attempts": 1,
+      "metadata_path": "/home/runner/work/clip-radar-automation/clip-radar-automation/output/stories/fridge-witness/story.json"
     }
   }
 }
