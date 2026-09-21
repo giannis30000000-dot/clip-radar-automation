@@ -8,7 +8,7 @@ import time
 import requests
 
 from media_tools import media_summary
-from .costs import sanitize
+from .costs import money, sanitize
 from .history import write_json
 from .provider_http import ProviderFailure, attempts, endpoint, rate, request_json
 from .providers import VisualAsset
@@ -29,19 +29,22 @@ def scene_prompt(story, scene) -> str:
 
 
 class RunwayVisualProvider:
-    def __init__(self, budget, session=None, download_session=None, sleep=time.sleep):
+    def __init__(self, budget, session=None, download_session=None, sleep=time.sleep, *, model=None, usd_per_second=None, max_attempts=None, ratio=None):
         self.budget = budget
         self.session = session or requests.Session()
         self.download_session = download_session or requests.Session()
         self.sleep = sleep
+        self.model, self.usd_per_second = model, usd_per_second
+        self.max_attempts, self.ratio = max_attempts, ratio
 
     def create(self, story: dict, scene: dict, directory: Path) -> VisualAsset:
         directory.mkdir(parents=True, exist_ok=True)
         base = "https://api.dev.runwayml.com/v1"
-        model = os.getenv("RUNWAY_MODEL", "gen4.5")
-        price = rate("RUNWAY_USD_PER_SECOND", ".12" if model == "gen4.5" else None)
+        model = self.model or os.getenv("RUNWAY_MODEL", "gen4.5")
+        prices = {"gen4.5": ".12", "gen4_turbo": ".05", "h3_max": ".08"}
+        price = money(self.usd_per_second) if self.usd_per_second is not None else rate("RUNWAY_USD_PER_SECOND", prices.get(model))
         duration = max(2, min(10, math.ceil(scene["estimated_duration"])))
-        ratio = os.getenv("RUNWAY_RATIO", "720:1280")
+        ratio = self.ratio or os.getenv("RUNWAY_RATIO", "720:1280")
         if ratio not in {"720:1280", "1280:720"}:
             raise ProviderFailure("UNSUPPORTED_RUNWAY_RATIO")
         payload = {"model": model, "promptText": scene_prompt(story, scene), "ratio": ratio, "duration": duration}
@@ -49,11 +52,19 @@ class RunwayVisualProvider:
         if scene.get("reference_image_url"):
             payload["promptImage"] = endpoint(scene["reference_image_url"])
             route = "/image_to_video"
+        if model in {"gen4_turbo", "h3_max"} and route != "/image_to_video":
+            raise ProviderFailure("REFERENCE_IMAGE_REQUIRED")
+        if model == "gen4_turbo" and duration not in {5, 10}:
+            raise ProviderFailure("GEN4_TURBO_DURATION_REQUIRES_5_OR_10")
+        if model == "h3_max":
+            payload.pop("ratio")
+            payload.update(resolution="768p", promptExpansionMode="disabled")
+        maximum_attempts = attempts() if self.max_attempts is None else max(1, min(3, int(self.max_attempts)))
         headers = {"Authorization": "Bearer " + os.environ["RUNWAYML_API_SECRET"], "X-Runway-Version": "2024-11-06"}
         report_path = directory / f"scene_{scene['scene_number']:02}.provider.json"
         report = {"provider": "runway", "model": model, "request": sanitize(payload), "attempts": []}
         output = directory / f"scene_{scene['scene_number']:02}.mp4"
-        for retry in range(attempts()):
+        for retry in range(maximum_attempts):
             record = self.budget.reserve("runway", model, price * duration, retry=retry, requested_seconds=duration, scene_number=scene["scene_number"])
             task_id = None
             try:
@@ -111,7 +122,7 @@ class RunwayVisualProvider:
             except (KeyError, TypeError, ValueError):
                 self.budget.update(record, status="INVALID_PROVIDER_RESULT")
                 raise ProviderFailure("INVALID_PROVIDER_RESULT") from None
-            if retry + 1 < attempts():
+            if retry + 1 < maximum_attempts:
                 self.sleep(min(2 ** retry, 4))
         raise ProviderFailure("VISUAL_ATTEMPTS_EXHAUSTED")
 
