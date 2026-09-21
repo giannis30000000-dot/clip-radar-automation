@@ -1,4 +1,4 @@
-name: Clip Radar Controlled Buffer Publication
+name: Clip Radar Legacy Publication Paused
 
 on:
   workflow_dispatch:
@@ -24,14 +24,15 @@ jobs:
     steps:
       - name: Require explicit live confirmation
         run: |
-          echo "Live publication was not authorized. Re-run this workflow with confirm_live=true."
-          exit 1
+          echo "Legacy publication is paused during the original story prototype."
+          exit 0
 
   publish-one:
     if: ${{ inputs.confirm_live == true }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
+      CLIP_RADAR_MODE: TWITCH_CLIP_MODE
       TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
       TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
       BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
@@ -75,7 +76,8 @@ jobs:
           CLOUDINARY_ABANDONED_RETENTION_HOURS: '24'
           CLOUDINARY_MAX_UPLOAD_BYTES: '78643200'
           CLOUDINARY_MAX_ACTIVE_OBJECTS: '8'
-          PUBLISHING_ENABLED: 'true'
+          # Legacy live route is paused during the original-story prototype.
+          PUBLISHING_ENABLED: 'false'
           PUBLISHING_DRY_RUN: 'false'
           ENABLE_YOUTUBE_PUBLISHING: 'false'
           PRODUCTION_TIMEZONE: 'Europe/Athens'

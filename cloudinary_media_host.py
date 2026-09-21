@@ -252,6 +252,10 @@ class CloudinaryMediaHost:
 
         public_id = _safe_public_id(str(clip_id), self.config.folder)
         if self._active_object_count(ledger, str(clip_id)) >= self.config.max_active_objects:
+            # Only bounded, expired, inactive assets are eligible. Reclaim
+            # abandoned dry-run uploads before rejecting a new live delivery.
+            self.cleanup_expired(ledger)
+        if self._active_object_count(ledger, str(clip_id)) >= self.config.max_active_objects:
             raise MediaDeliveryBlocked(
                 f"Cloudinary active-object safety limit reached ({self.config.max_active_objects})"
             )
@@ -392,7 +396,6 @@ class CloudinaryMediaHost:
     ) -> dict[str, Any]:
         """Delete only expired, non-active bridge assets with bounded work."""
 
-        self._require_credentials()
         now = now or self.clock()
         candidates: list[tuple[str, dict[str, Any]]] = []
         for clip_id, record in ledger.iter_clips():
@@ -403,14 +406,19 @@ class CloudinaryMediaHost:
             if not cleanup_after or cleanup_after > now:
                 continue
             networks = record.get("networks") or {}
-            if any(
+            if record.get("status") in {"QUEUED", "PUBLISHING"} or any(
                 str(network.get("status") or "") in {"QUEUED", "PUBLISHING"}
                 for network in networks.values()
             ):
                 continue
+            public_id = str(media.get("public_id") or "")
+            if not public_id.startswith(self.config.folder + "/"):
+                continue
             candidates.append((str(clip_id), media))
 
         results: list[dict[str, Any]] = []
+        if candidates:
+            self._require_credentials()
         for clip_id, media in candidates[: self.config.max_cleanup_per_run]:
             try:
                 payload = self._destroy(str(media.get("public_id") or ""))

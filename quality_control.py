@@ -150,3 +150,73 @@ def inspect_final(path: Path, manifest_path: Path | None = None) -> dict[str, An
 def validate_final(path: Path, manifest_path: Path | None = None):
     report = inspect_final(path, manifest_path)
     return report["status"] == "QUALITY_CHECK_PASSED", report["reason"]
+
+
+def inspect_story_final(path: Path, story_path: Path) -> dict[str, Any]:
+    """Story QC shares media/caption parsing, without Twitch framing assumptions."""
+    from io import BytesIO
+    import hashlib
+    import subprocess
+
+    from PIL import Image, ImageStat
+    from media_tools import ffmpeg_binary, media_summary
+    from story_engine.schema import validate_story
+
+    report = {"schema_version": 1, "status": "REVIEW_REQUIRED", "checks": {}, "reason": "story_qc_incomplete"}
+    checks = report["checks"]
+    try:
+        story = validate_story(json.loads(story_path.read_text(encoding="utf-8")))
+        checks["story_metadata"] = True
+        manifest = json.loads(path.with_suffix(".render.json").read_text(encoding="utf-8"))
+        data = media_summary(path)
+        report["media"] = data
+        duration = data["duration"]
+        checks.update({
+            "valid_mp4": path.suffix.lower() == ".mp4" and b"ftyp" in path.read_bytes()[:64],
+            "vertical_canvas": (data["width"], data["height"]) in {(720, 1280), (1080, 1920)},
+            "video_audio": data["has_video"] and data["has_audio"],
+            "duration": 60 <= duration <= 75 and abs(duration - story["actual_voice_duration_seconds"]) < .15,
+            "manifest_identity": manifest["story_id"] == story["story_id"] and manifest["mode"] == "ORIGINAL_STORY_MODE",
+        })
+        subtitles = manifest["subtitles"]
+        captions = _read_captions(path.parent / subtitles["file"])
+        normalize = lambda text: re.sub(r"\s+", " ", text).strip()
+        checks["captions_complete"] = bool(captions) and normalize(" ".join(c["text"] for c in captions)) == normalize(story["full_script"])
+        checks["caption_timing"] = bool(captions) and all(0 <= c["start"] < c["end"] <= duration + .05 for c in captions) and all(b["start"] >= a["end"] - .011 for a, b in zip(captions, captions[1:]))
+        checks["caption_sync"] = len(captions) == len(subtitles["entries"]) and all(abs(a["start"] - b["start"]) < .011 and abs(a["end"] - b["end"]) < .011 for a, b in zip(captions, subtitles["entries"]))
+        checks["mobile_captions"] = subtitles["caption_layers"] == 1 and subtitles["position"] == {"x": 360, "y": 1060} and subtitles["font_size"] >= 32 and all(len(c["text"].splitlines()) <= 2 and max(map(len, c["text"].splitlines())) <= 24 for c in captions)
+        scenes = manifest["scenes"]
+        checks["scenes_complete"] = len(scenes) == len(story["scenes"]) and all(
+            s["scene_number"] == original["scene_number"] and
+            abs(s["start_time"] - original["start_time"]) <= .035 and
+            abs(s["duration"] - original["estimated_duration"]) <= .07 and
+            abs(s["encoded_duration"] - s["duration"]) <= .07 and
+            (path.parent / s["asset"]).is_file()
+            for s, original in zip(scenes, story["scenes"])
+        )
+        checks["scene_timeline"] = bool(scenes) and abs(scenes[0]["start_time"]) < .01 and abs(sum(s["duration"] for s in scenes) - duration) < .1 and all(abs(a["start_time"] + a["duration"] - b["start_time"]) < .01 for a, b in zip(scenes, scenes[1:]))
+        # Decode every frame/audio packet, rather than trusting a valid header.
+        decoded = subprocess.run([ffmpeg_binary(), "-v", "error", "-xerror", "-i", str(path), "-f", "null", "-"], capture_output=True, timeout=180)
+        checks["full_decode"] = decoded.returncode == 0
+        volume = subprocess.run([ffmpeg_binary(), "-hide_banner", "-i", str(path), "-vn", "-af", "volumedetect", "-f", "null", "-"], capture_output=True, text=True, timeout=120)
+        match = re.search(r"mean_volume:\s*([-0-9.]+) dB", volume.stderr)
+        checks["audible_narration"] = bool(match and -40 < float(match.group(1)) < -5)
+        report["mean_volume_db"] = float(match.group(1)) if match else None
+        fingerprints, variations = [], []
+        for scene in scenes:
+            moment = scene["start_time"] + scene["duration"] / 2
+            frame = subprocess.run([ffmpeg_binary(), "-v", "error", "-ss", str(moment), "-i", str(path), "-frames:v", "1", "-vf", "scale=180:320", "-f", "image2pipe", "-vcodec", "png", "-"], check=True, capture_output=True, timeout=30)
+            with Image.open(BytesIO(frame.stdout)) as image:
+                stage = image.convert("RGB").crop((10, 75, 170, 225))
+                variations.append(max(ImageStat.Stat(stage).stddev))
+                fingerprints.append(hashlib.sha256(stage.tobytes()).hexdigest())
+        checks["no_empty_scenes"] = bool(variations) and min(variations) > 12
+        checks["scene_changes"] = len(set(fingerprints)) >= max(2, len(scenes) // 2)
+        checks["publishing_disabled"] = manifest.get("publishing_enabled") is False and all(m.get("publishing_enabled") is False for m in story["platform_metadata"].values())
+        report["scene_visual_variation"] = [round(v, 2) for v in variations]
+        report["status"] = "QUALITY_CHECK_PASSED" if all(checks.values()) else "REVIEW_REQUIRED"
+        report["reason"] = "story_container_audio_captions_scenes_decode_passed" if all(checks.values()) else "story_quality_check_failed"
+    except Exception as exc:
+        report["reason"] = f"story_qc_error: {type(exc).__name__}: {exc}"
+    report["failed_checks"] = [key for key, value in checks.items() if not value]
+    return report

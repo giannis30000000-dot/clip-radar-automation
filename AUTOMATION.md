@@ -1,15 +1,28 @@
-# Clip Radar automatic acquisition and gated publication
+# Clip Radar original story prototype
 
-The production path is now:
+The default mode is now **ORIGINAL_STORY_MODE**. See [STORY_ENGINE.md](STORY_ENGINE.md)
+for the offline CLI, provider contract, durable history, artifacts and limitations.
+The manual **Clip Radar Original Story Prototype** workflow produces review
+videos on GitHub-hosted Linux. No social/media-host credentials are provided to
+generation. Public posting and production scheduling remain disabled.
+
+The previous hourly Twitch schedule has been removed; its acquisition path is
+available explicitly with `CLIP_RADAR_MODE=TWITCH_CLIP_MODE`. The controlled
+legacy publishing workflow is paused with `PUBLISHING_ENABLED=false`.
+
+## Preserved Twitch architecture
+
+The optional legacy path is:
 
 `Twitch Helix discovery -> viral ranking -> sharing_whitelist.json -> multi-layer dedupe -> public Twitch clip acquisition -> source validation -> local Whisper transcription -> content-aware 9:16 edit -> strict QC -> rights/content safety -> PUBLISH_ELIGIBLE -> Cloudinary temporary delivery -> gated Buffer plan -> artifacts`
 
 `orchestrator.py` writes the original landscape MP4 to `output/sources/`, the
 edited vertical MP4 to `output/final/`, and structured run, delivery, and
 publication reports. With `PUBLISHING_ENABLED=false` and
-`PUBLISHING_DRY_RUN=true`, the cloud test uploads only the final vertical MP4
-to Cloudinary, verifies its public HTTPS delivery, and creates a sanitized
-Buffer plan without creating posts. The GitHub Action uploads the source,
+`PUBLISHING_DRY_RUN=true`, planning never uploads to Cloudinary. A missing
+public URL is represented as a required future input in the Buffer plan.
+Only an explicitly enabled, non-dry live path creates a delivery asset.
+The legacy GitHub Action uploads the source,
 final, run summary, Cloudinary delivery report, Buffer plan, and state audit as
 separate artifacts for inspection.
 
@@ -33,7 +46,7 @@ clip ID first, then broadcaster/VOD/timestamp overlap, then sanitized
 publication-history aliases, and finally decoded source/final audio and visual
 fingerprints. It is keyed by media identity, not filenames. The Action restores
 and saves the ledger using a unique per-run cache key with a branch prefix, so
-later hourly runs skip clips already prepared or published. The seed file
+later legacy runs skip clips already prepared or published. The seed file
 `historical_publications.json` includes the four accidental TikTok posts and
 the earlier Jean Paul delivery publication alias. `buffer-audit.yml` imports
 later read-only Buffer history into the same ledger without network mutations.
@@ -103,7 +116,7 @@ platform-specific metadata, and the GraphQL `createPost` input.
 
 The target slots are `12:00, 15:30, 19:00, 22:00` in `Europe/Athens`. The
 publisher reserves distinct slots and enforces `MAX_DAILY_PUBLICATIONS=4` by
-local date. These are an upper bound, not quotas; hourly discovery still uses
+local date. These are an upper bound, not quotas; legacy discovery uses
 the strongest currently available eligible candidate and never forces category
 diversity. YouTube remains disabled until the account is recovered and its
 Buffer channel is connected.
@@ -111,13 +124,12 @@ Buffer channel is connected.
 Buffer receives the verified Cloudinary HTTPS URL in both the Instagram Reel
 and TikTok `createPost` request plans. YouTube remains disabled.
 
-`controlled-buffer-publication.yml` is manual-only and requires the explicit
-`confirm_live=true` dispatch input. It is the only workflow configured to set
-`PUBLISHING_ENABLED=true`; it schedules one fresh, non-duplicate candidate
-seven minutes ahead on Instagram and TikTok, with YouTube disabled. The
-hourly `scan.yml` workflow remains permanently in Buffer dry-run mode.
+`controlled-buffer-publication.yml` retains its historical manual controls but
+is paused with `PUBLISHING_ENABLED=false` for the story milestone. No workflow
+currently enables live publication. The legacy `scan.yml` is manual-only and
+keeps Buffer planning in dry-run mode, with no Cloudinary upload.
 
-## Required Action secrets
+## Legacy Action secrets (not used by original story generation)
 
 Configure `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `BUFFER_API_KEY`,
 `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` as

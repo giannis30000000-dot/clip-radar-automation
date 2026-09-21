@@ -1,8 +1,7 @@
-"""Clip Radar's acquisition -> edit -> QC -> gated publication orchestrator.
+"""Clip Radar mode dispatcher: original story review by default.
 
-Publishing is still inert unless explicitly requested by configuration.  The
-normal Action run uses Buffer dry-run mode to create a sanitized plan without
-making any external post mutation.
+The explicit legacy Twitch mode retains acquisition and gated publishing.
+Story generation never invokes a social publisher or public media host.
 """
 
 from __future__ import annotations
@@ -121,7 +120,7 @@ def run_live(
         publication_ledger = PublicationLedger(
             Path(os.getenv("CLIP_RADAR_PUBLICATION_STATE_FILE", "state/publications.json"))
         )
-        if publishing_backend == "buffer":
+        if publishing_backend == "buffer" and publishing_enabled and not publishing_dry_run:
             media_host = CloudinaryMediaHost()
     now_candidates = scan_candidates()
     print_candidates(now_candidates)
@@ -464,6 +463,21 @@ def run_live(
     return summary
 
 
+def generate_story_video(*args, **kwargs):
+    """Stable dashboard/API entry point; review artifacts only."""
+    from story_engine import generate_story_video as generate
+    return generate(*args, **kwargs)
+
+
+def run_configured():
+    mode = os.getenv("CLIP_RADAR_MODE", "ORIGINAL_STORY_MODE").strip().upper()
+    if mode == "ORIGINAL_STORY_MODE":
+        return generate_story_video()
+    if mode == "TWITCH_CLIP_MODE":
+        return run_live()
+    raise ValueError(f"unknown CLIP_RADAR_MODE: {mode}")
+
+
 def process_candidates(candidates, output_dir: Path = Path("output")):
     """Compatibility wrapper for callers that already have Candidate objects."""
     ranked = sorted(candidates, key=lambda item: item.score, reverse=True)
@@ -491,7 +505,7 @@ if __name__ == "__main__":
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     try:
-        result = run_live()
+        result = run_configured()
     except Exception as exc:
         output_dir = Path(os.getenv("CLIP_RADAR_OUTPUT_DIR", "output"))
         summary = {

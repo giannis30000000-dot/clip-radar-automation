@@ -1,0 +1,4 @@
+# Offline story mode avoids ASR model downloads and Twitch acquisition packages.
+requests==2.32.3
+tzdata==2026.4
+Pillow==12.3.0

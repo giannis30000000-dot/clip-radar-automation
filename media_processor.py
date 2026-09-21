@@ -120,7 +120,7 @@ def ass_timestamp(seconds: float) -> str:
     return f"{hours}:{minutes:02}:{whole:02}.{centiseconds:02}"
 
 
-def write_ass(entries, path: Path, position: tuple[int, int] = (360, 1060)):
+def write_ass(entries, path: Path, position: tuple[int, int] = (360, 1060), font_size: int = 22):
     """Write one explicit-resolution libass transcript layer."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -137,6 +137,7 @@ Style: ClipRadar,Arial,22,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,0,0,0,0,10
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
+    header = header.replace("ClipRadar,Arial,22,", f"ClipRadar,Arial,{int(font_size)},")
     with path.open("w", encoding="utf-8", newline="\n") as handle:
         handle.write(header)
         for entry in entries:
@@ -145,7 +146,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 continue
             # PlayResX/PlayResY and an explicit position keep captions in the
             # lower safe zone across ffmpeg/libass versions.
-            caption = caption.replace("\\", "\\\\").replace("\n", r"\N")
+            caption = caption.replace("{", "(").replace("}", ")").replace("\\", "\\\\").replace("\n", r"\N")
             caption = f"{{\\an2\\pos({int(position[0])},{int(position[1])})}}" + caption
             handle.write(
                 f"Dialogue: 0,{ass_timestamp(entry['start'])},{ass_timestamp(entry['end'])},ClipRadar,,0,0,0,,{caption}\n"
@@ -363,3 +364,66 @@ def render_vertical(source: Path, output: Path, hook: str = "CLIP RADAR"):
     finally:
         hook_file.unlink(missing_ok=True)
     return entries
+
+
+def render_story(story: dict, assets, audio: Path, captions: list[dict], output: Path) -> dict:
+    """Assemble provider images or clips using the existing ffmpeg/ASS helpers.
+
+    All scene boundaries are quantized from the narration timeline, avoiding
+    cumulative frame rounding drift across independent scene encodes.
+    """
+    import math
+    import tempfile
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if len(assets) != len(story["scenes"]):
+        raise ValueError("one visual asset is required per scene")
+    duration = float(story["actual_voice_duration_seconds"])
+    subtitles = output.with_suffix(".ass")
+    write_ass(captions, subtitles, position=(360, 1060), font_size=38)
+    write_srt(captions, output.with_suffix(".srt"))
+    scene_reports = []
+    temporary_output = output.with_name(output.stem + ".partial.mp4")
+    try:
+        with tempfile.TemporaryDirectory(prefix="story-render-", dir=output.parent) as scratch:
+            work = Path(scratch)
+            frame_boundaries = [round(s["start_time"] * 30) for s in story["scenes"]] + [math.ceil(duration * 30)]
+            for index, (scene, asset) in enumerate(zip(story["scenes"], assets)):
+                if asset.kind not in {"image", "video"} or not asset.path.is_file() or not asset.path.stat().st_size:
+                    raise ValueError(f"scene {index+1}: empty or unsupported visual asset")
+                frames = frame_boundaries[index+1] - frame_boundaries[index]
+                if frames < 1:
+                    raise ValueError("empty scene timeline")
+                segment = work / f"scene_{index:02}.mp4"
+                source_args = ["-loop", "1", "-framerate", "30"] if asset.kind == "image" else []
+                filters = "scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1"
+                if asset.kind == "image":
+                    direction = "on" if index % 2 == 0 else f"({frames}-on)"
+                    filters += f",zoompan=z='1+0.025*{direction}/{frames}':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=1:s=720x1280:fps=30"
+                else:
+                    # A generated clip may be shorter than narration; hold its
+                    # last frame explicitly, and leave the decision in metadata.
+                    filters += f",fps=30,tpad=stop_mode=clone:stop_duration={frames/30:.6f}"
+                command = [ffmpeg_binary(), "-v", "error", "-y", *source_args, "-i", str(asset.path.resolve()), "-an", "-vf", filters, "-frames:v", str(frames), "-c:v", "libx264", "-threads", "2", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p", str(segment)]
+                subprocess.run(command, check=True, capture_output=True, timeout=180)
+                measured = media_summary(segment)
+                if not measured["has_video"] or abs(measured["duration"] - frames / 30) > .1:
+                    raise ValueError(f"scene {index+1} failed render validation")
+                scene_reports.append({"scene_number": index+1, "start_time": frame_boundaries[index]/30, "duration": frames/30, "frames": frames, "asset": os.path.relpath(asset.path, output.parent).replace("\\", "/"), "asset_kind": asset.kind, "provider": asset.provider, "encoded_duration": measured["duration"]})
+            concat = work / "scenes.txt"
+            # Relative generated filenames contain no user-controlled quoting.
+            concat.write_text("".join(f"file 'scene_{i:02}.mp4'\n" for i in range(len(assets))), encoding="utf-8")
+            joined = work / "joined.mp4"
+            subprocess.run([ffmpeg_binary(), "-v", "error", "-y", "-f", "concat", "-safe", "1", "-i", str(concat), "-c", "copy", str(joined)], check=True, capture_output=True, timeout=120)
+            subprocess.run([ffmpeg_binary(), "-v", "error", "-y", "-i", str(joined), "-i", str(audio), "-vf", f"subtitles='{_filter_path(subtitles.resolve())}':original_size=720x1280", "-map", "0:v:0", "-map", "1:a:0", "-t", f"{duration:.6f}", "-c:v", "libx264", "-threads", "2", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(temporary_output)], check=True, capture_output=True, timeout=300)
+        os.replace(temporary_output, output)
+    finally:
+        temporary_output.unlink(missing_ok=True)
+    manifest = {
+        "schema_version": 1, "mode": "ORIGINAL_STORY_MODE", "story_id": story["story_id"],
+        "duration": duration, "canvas": [720, 1280], "fps": 30, "scenes": scene_reports,
+        "subtitles": {"file": subtitles.name, "count": len(captions), "entries": captions, "caption_layers": 1, "font_size": 38, "position": {"x": 360, "y": 1060}, "timing_basis": "synthesized_phrase_pcm"},
+        "branding": "subtle_scene_footer", "audio": os.path.relpath(audio, output.parent).replace("\\", "/"), "publishing_enabled": False,
+    }
+    output.with_suffix(".render.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    return manifest

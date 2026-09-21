@@ -1,10 +1,7 @@
-name: Clip Radar Automatic Acquisition Test
+name: Clip Radar Legacy Twitch Review
 
 on:
   workflow_dispatch:
-  schedule:
-    # Hourly discovery so fresh viral moments are detected early.
-    - cron: '17 * * * *'
 
 permissions:
   contents: read
@@ -19,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
+      CLIP_RADAR_MODE: TWITCH_CLIP_MODE
       TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
       TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
       BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
@@ -54,9 +52,6 @@ jobs:
           BUFFER_CHANNEL_CONFIG: state/buffer_channels.json
           BUFFER_BRAND_NAME: Clip Radar
           BUFFER_NETWORKS: 'tiktok,instagram'
-          CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
-          CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
-          CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
           CLOUDINARY_FOLDER: clipradar/buffer
           CLOUDINARY_RETENTION_HOURS: '48'
           CLOUDINARY_ABANDONED_RETENTION_HOURS: '24'

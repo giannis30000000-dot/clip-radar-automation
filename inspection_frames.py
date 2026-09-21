@@ -52,6 +52,34 @@ def inspect_file(video: Path, destination: Path) -> dict[str, str]:
     return results
 
 
+def inspect_story_file(video: Path, destination: Path) -> dict[str, str]:
+    """Portable review frames without requiring the legacy OpenCV detector."""
+    from io import BytesIO
+    import subprocess
+    from PIL import Image, ImageDraw
+    from media_tools import ffmpeg_binary
+
+    destination.mkdir(parents=True, exist_ok=True)
+    manifest = json.loads(video.with_suffix(".render.json").read_text(encoding="utf-8"))
+    scenes = manifest["scenes"]
+    sheet = Image.new("RGB", (1080, 1320), "#182437")
+    results = {}
+    for index, scene in enumerate([scenes[i] for i in (0, 2, 4, 6, 9, len(scenes)-1)]):
+        moment = scene["start_time"] + min(.8, scene["duration"] / 2)
+        raw = subprocess.run([ffmpeg_binary(), "-v", "error", "-ss", str(moment), "-i", str(video), "-frames:v", "1", "-vf", "scale=360:640", "-f", "image2pipe", "-vcodec", "png", "-"], check=True, capture_output=True, timeout=30)
+        image = Image.open(BytesIO(raw.stdout)).convert("RGB")
+        target = destination / f"scene_{scene['scene_number']:02}.png"
+        image.save(target)
+        results[f"scene_{scene['scene_number']:02}"] = str(target)
+        x, y = index % 3 * 360, index // 3 * 660
+        sheet.paste(image, (x, y))
+        ImageDraw.Draw(sheet).text((x+12, y+642), f"Scene {scene['scene_number']:02} / {moment:.2f}s", fill="white")
+    target = destination / "contact_sheet.jpg"
+    sheet.save(target, quality=92)
+    results["contact_sheet"] = str(target)
+    return results
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         print("usage: python inspection_frames.py <final-directory> <inspection-directory>")

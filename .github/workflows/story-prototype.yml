@@ -1,0 +1,82 @@
+name: Clip Radar Original Story Prototype
+
+on:
+  workflow_dispatch:
+
+# Manual review only. A daily trigger can be added after prototype acceptance.
+permissions:
+  contents: write
+
+concurrency:
+  group: clip-radar-story-history
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CLIP_RADAR_MODE: ORIGINAL_STORY_MODE
+      CLIP_RADAR_OUTPUT_DIR: output/stories
+      STORY_HISTORY_FILE: state/story_history.json
+      STORY_SCRIPT_PROVIDER: demo
+      STORY_VISUAL_PROVIDER: demo
+      STORY_VOICE_PROVIDER: demo
+      PUBLISHING_ENABLED: 'false'
+      PUBLISHING_DRY_RUN: 'false'
+      ENABLE_YOUTUBE_PUBLISHING: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install offline prototype dependencies
+        run: |
+          pip install --disable-pip-version-check -r requirements-story.txt
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg espeak-ng fonts-dejavu-core
+      - name: Existing and story regression tests
+        run: python -m unittest discover -v
+      - name: Restore durable premise history
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m story_engine.cloud_state restore
+      - name: Generate one review video without service credentials
+        run: python orchestrator.py
+      - name: Verify result and publish-disabled contract
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          summary = json.loads(Path('output/stories/run_summary.json').read_text())
+          assert summary['publishing_enabled'] is False
+          assert summary['live_request_sent'] is False
+          assert summary['status'] in {'READY_FOR_REVIEW', 'REVIEW_REQUIRED', 'NO_NEW_PREMISE'}
+          if summary['status'] == 'READY_FOR_REVIEW':
+              assert Path(summary['final']).is_file()
+              assert summary['qc']['status'] == 'QUALITY_CHECK_PASSED'
+          with open(__import__('os').environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write('Story result: **' + summary['status'] + '**\n\n')
+              f.write(summary.get('title', summary.get('reason', '')) + '\n\nPublishing disabled. Review artifacts below.\n')
+          PY
+      - name: Save durable story state even when generation needs review
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m story_engine.cloud_state save
+      - name: Upload full review package
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clip-radar-original-story-${{ github.run_id }}
+          path: output/stories
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Upload story state audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clip-radar-story-history-${{ github.run_id }}
+          path: state/story_history.json
+          if-no-files-found: warn
+          retention-days: 90
