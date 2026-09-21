@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "stories": {
+    "toaster-lawyer": {
+      "story_id": "toaster-lawyer",
+      "title": "My Toaster Hired a Lawyer",
+      "concept": "A toaster unionizes the kitchen after its owner calls it replaceable, then negotiates a bread vacation.",
+      "concept_fingerprint": "a9664172eaccf7e130cbfcfb498a83c65649c2a52d6069bf3ae7dec98d1a0527",
+      "characters": [
+        {
+          "character_id": "toast",
+          "name": "Toast",
+          "description": "Recurring fictional toaster with absurdly human ambitions."
+        }
+      ],
+      "date_generated": "2026-09-21T11:53:05.497429+00:00",
+      "output_path": "/home/runner/work/clip-radar-automation/clip-radar-automation/output/stories/toaster-lawyer/final.mp4",
+      "status": "READY_FOR_REVIEW",
+      "qc_result": "QUALITY_CHECK_PASSED",
+      "publication_state": "REVIEW_REQUIRED",
+      "analytics": {},
+      "generation_attempts": 1,
+      "metadata_path": "/home/runner/work/clip-radar-automation/clip-radar-automation/output/stories/toaster-lawyer/story.json"
+    }
+  }
+}
