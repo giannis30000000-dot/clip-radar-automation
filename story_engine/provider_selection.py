@@ -33,6 +33,8 @@ class FallbackProvider:
 
     def rewrite(self, story, feedback):
         # Never replace a reserved premise with a different fallback story.
+        if self.failed:
+            raise ProviderFailure("PRODUCTION_STORY_UNAVAILABLE_FOR_REWRITE")
         return self.production.rewrite(story, feedback)
 
 

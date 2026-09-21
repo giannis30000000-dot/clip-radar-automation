@@ -250,3 +250,12 @@ class DialogueTests(unittest.TestCase):
             result = self._engine(DemoStoryProvider().generate(excluded_concepts=set()), Mock(), visual)
         self.assertEqual(result["status"], "REVIEW_REQUIRED")
         create.assert_not_called()
+
+    def test_failed_production_writer_is_not_reentered_after_fallback(self):
+        from story_engine.provider_selection import FallbackProvider
+        production = Mock()
+        wrapper = FallbackProvider(production, DialogueDemoProvider(), CostBudget(self.root / "cost.json", 0), "script")
+        wrapper.failed = True
+        with self.assertRaisesRegex(ProviderFailure, "UNAVAILABLE_FOR_REWRITE"):
+            wrapper.rewrite(demo(), "Measured duration needs revision")
+        production.rewrite.assert_not_called()

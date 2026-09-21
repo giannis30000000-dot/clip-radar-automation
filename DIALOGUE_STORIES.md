@@ -124,7 +124,7 @@ scores, not evidence that a paid LLM was called.
   single caption track, clear cast labels and explicitly labeled placeholder art.
 - Local final: output/dialogue-demo/dialogue-elevator-interview/final.mp4.
 - No paid requests; cost report records **$0**. No cloud generation dispatched.
-- Automated suite: **97/97 passed**, preserving all prior 76 tests; new tests cover
+- Automated suite: **98/98 passed**, preserving all prior 76 tests; new tests cover
   selection, weak rejection, critique rewrites, limits, mapping/narrator, alignment,
   captions, dedupe, category variety, fallback and pre-visual spending barriers.
 
