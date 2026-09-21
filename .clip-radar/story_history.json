@@ -21,6 +21,27 @@
       "analytics": {},
       "generation_attempts": 1,
       "metadata_path": "/home/runner/work/clip-radar-automation/clip-radar-automation/output/stories/toaster-lawyer/story.json"
+    },
+    "moon-landlord": {
+      "story_id": "moon-landlord",
+      "title": "My Cat Bought the Moon",
+      "concept": "A cat buys a novelty moon deed and charges the neighborhood rent for moonlight, then gets billed by the sun.",
+      "concept_fingerprint": "cac03e19de363b4eb30efc60af296926371d9f7bf373e384427bca4947e0afdd",
+      "characters": [
+        {
+          "character_id": "beans",
+          "name": "Beans",
+          "description": "Recurring fictional cat with absurdly human ambitions."
+        }
+      ],
+      "date_generated": "2026-09-21T11:54:57.936380+00:00",
+      "output_path": "/home/runner/work/clip-radar-automation/clip-radar-automation/output/stories/moon-landlord/final.mp4",
+      "status": "READY_FOR_REVIEW",
+      "qc_result": "QUALITY_CHECK_PASSED",
+      "publication_state": "REVIEW_REQUIRED",
+      "analytics": {},
+      "generation_attempts": 1,
+      "metadata_path": "/home/runner/work/clip-radar-automation/clip-radar-automation/output/stories/moon-landlord/story.json"
     }
   }
 }
