@@ -88,6 +88,13 @@ class DialogueTests(unittest.TestCase):
         self.assertEqual(normalized["hook"], normalized["dialogue"][0]["text"])
         self.assertEqual(evaluate_story(normalized)["status"], "PASSED")
 
+    def test_normalization_repairs_invalid_listener_references_from_scene_presence(self):
+        s = demo()
+        s["dialogue"][0]["listeners"] = ["invented-character", "lift"]
+        normalized = normalize_dialogue(s)
+        self.assertEqual(normalized["dialogue"][0]["listeners"], ["mira", "ben"])
+        validate_story(normalized)
+
     def test_schema_rejects_unknown_speaker_listener_and_overlapping_line(self):
         for mutate in (lambda s: s["dialogue"][0].update(speaker_id="unknown"), lambda s: s["dialogue"][0].update(listeners=["unknown"]), lambda s: s["dialogue"][1].update(intended_start_time=0), lambda s: s["scenes"][0].update(active_speaker="ben")):
             s = demo()

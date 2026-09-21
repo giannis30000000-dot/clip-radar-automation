@@ -77,6 +77,15 @@ def normalize_dialogue(story):
     # spoken line prevents a harmless model paraphrase from breaking the
     # existing hook/opening quality check.
     story["hook"] = story["dialogue"][0]["text"]
+    # Listener references are relational data. Keep only scene-local declared
+    # characters; if a model emits a malformed list, all other present
+    # characters are the safe mechanical fallback. Speaker IDs themselves
+    # remain fail-closed in validate_dialogue.
+    for line in story["dialogue"]:
+        scene = story["scenes"][line["scene_number"] - 1]
+        present = scene.get("characters_present", [])
+        valid = [listener for listener in line.get("listeners", []) if listener in present and listener != line.get("speaker_id")]
+        line["listeners"] = valid or [character for character in present if character != line.get("speaker_id")]
     cursor = 0.0
     for index, line in enumerate(story["dialogue"], 1):
         duration = round(estimate_duration(line["text"]) + .12, 3)

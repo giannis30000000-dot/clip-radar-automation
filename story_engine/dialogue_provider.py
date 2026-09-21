@@ -239,6 +239,15 @@ def _quality_repair_instruction(feedback):
     )
 
 
+def _dialogue_link_repair_instruction(feedback):
+    if not any(reason in feedback for reason in ("invalid listeners", "unsafe speaker ID")):
+        return ""
+    return (
+        "MANDATORY DIALOGUE-LINK REPAIR: use lowercase safe character IDs matching ^[a-z][a-z0-9_-]{0,39}$ for every character_id and speaker_id. "
+        "Every speaker_id must exactly match a declared character_id and be present in that scene; every listeners entry must be another declared character present in that same scene, never the speaker and never an invented ID. "
+    )
+
+
 class DialogueStoryProvider(ChatStoryProvider):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -340,6 +349,7 @@ class DialogueStoryProvider(ChatStoryProvider):
             character_repair = _character_repair_instruction(feedback)
             visual_bible_repair = _visual_bible_repair_instruction(feedback)
             quality_repair = _quality_repair_instruction(feedback)
+            dialogue_link_repair = _dialogue_link_repair_instruction(feedback)
             prompt = (
                 f"Write the selected concept as a {policy['minimum']}-75 second DIALOGUE-FIRST skit. Default aim 65-75s. "
                 "Hard timing contract: return 188-192 spoken dialogue words across exactly 20 dialogue objects; count only dialogue[].text, not action or visual fields. "
@@ -349,13 +359,13 @@ class DialogueStoryProvider(ChatStoryProvider):
                 "First dialogue line is ONLY a 4-5-word immediate hook; set hook character-for-character equal to dialogue[0].text, including punctuation and capitalization. Then goal, conflict, causal escalation, at least three reaction/punchline beats and final earned payoff. "
                 "Use exactly 10 contiguous scenes with exactly 2 dialogue lines per scene: line 1 is 4-5 words and lines 2-20 are conversational 9-11-word turns. Include at least three real reaction/punchline beats, with payoff_moment:true on those scenes and on the final scene. No exposition dumps or generic narration; every line has at least two spoken words. "
                 "Return JSON with title, hook (exact opening text), ending_type=standalone unless a sequel truly improves it, sequel_possible:boolean, "
-                "characters:[{character_id,name,personality,speaking_style,visual_description,description,voice_profile_hint}], "
+                "characters:[{character_id,name,personality,speaking_style,visual_description,description,voice_profile_hint,visual_identity}], use lowercase safe character IDs, "
                 "dialogue:[{speaker_id,text,emotion,scene_number,action,listeners:[character_id]}] in playback order, "
                 "scenes:[{scene_number,characters_present,visual_description,visual_prompt,action_direction,reaction_direction,camera_direction,sound_effect_hint,background_music_mood,transition_hint,payoff_moment:boolean}], "
                 "art_direction:{style,environment}, story_beats:{setup,goal,conflict,escalation:[at least two causal beats],payoff}, "
                 "platform_metadata:{instagram:{caption},tiktok:{caption},youtube:{caption}}. No voice IDs, no existing characters. "
                 + visual_instructions +
-                timing_repair + scene_repair + character_repair + visual_bible_repair + quality_repair + f"Selected concept: {json.dumps(selected)}. Rewrite feedback: {feedback}"
+                timing_repair + scene_repair + character_repair + visual_bible_repair + quality_repair + dialogue_link_repair + f"Selected concept: {json.dumps(selected)}. Rewrite feedback: {feedback}"
             )
             normalized_story = None
             try:
