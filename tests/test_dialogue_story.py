@@ -160,6 +160,22 @@ class DialogueTests(unittest.TestCase):
         self.assertIn("MANDATORY SCENE-TIMING REPAIR", rewrite_prompt)
         self.assertIn("at least two spoken words", rewrite_prompt)
 
+    def test_character_schema_failure_gets_targeted_rewrite_instruction(self):
+        incomplete = demo()
+        incomplete["characters"][0].pop("voice_profile_hint")
+        provider = DialogueStoryProvider(CostBudget(self.root / "character-feedback.json", 0))
+        provider._request = Mock(side_effect=[
+            {"candidates": demo_candidates()},
+            incomplete,
+            demo(),
+            {"scores": {k: 9 for k in QUALITY_METRICS}},
+        ])
+        result = provider.generate(excluded_concepts=set())
+        self.assertEqual(result["story_quality"]["status"], "PASSED")
+        rewrite_prompt = provider._request.call_args_list[2].args[0]
+        self.assertIn("MANDATORY CHARACTER-SCHEMA REPAIR", rewrite_prompt)
+        self.assertIn("voice_profile_hint", rewrite_prompt)
+
     def test_candidate_request_uses_strict_schema_for_supported_openai_model(self):
         payload = {"candidates": demo_candidates()}
         response = Mock(status_code=200, json=lambda: {"choices": [{"message": {"content": json.dumps(payload)}}], "usage": {"prompt_tokens": 20, "completion_tokens": 40}})

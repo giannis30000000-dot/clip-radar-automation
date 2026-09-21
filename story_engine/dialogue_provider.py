@@ -143,6 +143,16 @@ def _scene_repair_instruction(feedback):
     )
 
 
+def _character_repair_instruction(feedback):
+    if "incomplete dialogue character" not in feedback:
+        return ""
+    return (
+        "MANDATORY CHARACTER-SCHEMA REPAIR: include exactly 2-4 speaking characters, and for every character return nonempty string values for "
+        "character_id, name, personality, speaking_style, visual_description, description and voice_profile_hint. "
+        "Do not omit, null, abbreviate or replace any of those fields; preserve distinct voices and visual identities. "
+    )
+
+
 class DialogueStoryProvider(ChatStoryProvider):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -236,6 +246,7 @@ class DialogueStoryProvider(ChatStoryProvider):
                 )
             timing_repair = _timing_repair_instruction(feedback)
             scene_repair = _scene_repair_instruction(feedback)
+            character_repair = _character_repair_instruction(feedback)
             prompt = (
                 f"Write the selected concept as a {policy['minimum']}-75 second DIALOGUE-FIRST skit. Default aim 65-75s. "
                 "Hard timing contract: return 188-192 spoken dialogue words across exactly 20 dialogue objects; count only dialogue[].text, not action or visual fields. "
@@ -251,7 +262,7 @@ class DialogueStoryProvider(ChatStoryProvider):
                 "art_direction:{style,environment}, story_beats:{setup,goal,conflict,escalation:[at least two causal beats],payoff}, "
                 "platform_metadata:{instagram:{caption},tiktok:{caption},youtube:{caption}}. No voice IDs, no existing characters. "
                 + visual_instructions +
-                timing_repair + scene_repair + f"Selected concept: {json.dumps(selected)}. Rewrite feedback: {feedback}"
+                timing_repair + scene_repair + character_repair + f"Selected concept: {json.dumps(selected)}. Rewrite feedback: {feedback}"
             )
             normalized_story = None
             try:
