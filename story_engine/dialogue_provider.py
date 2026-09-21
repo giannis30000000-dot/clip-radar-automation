@@ -133,6 +133,16 @@ def _timing_repair_instruction(feedback):
     )
 
 
+def _scene_repair_instruction(feedback):
+    if "scene gap, overlap or unreasonable length" not in feedback:
+        return ""
+    return (
+        "MANDATORY SCENE-TIMING REPAIR: keep scenes numbered contiguously from 1, with 1-3 dialogue lines in every scene. "
+        "Every dialogue line must contain at least two spoken words, and every normalized scene must remain between 0.5 and 12 seconds. "
+        "Do not create a one-word reaction scene or leave a scene without dialogue. "
+    )
+
+
 class DialogueStoryProvider(ChatStoryProvider):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -225,6 +235,7 @@ class DialogueStoryProvider(ChatStoryProvider):
                     "No visible text, signage, logos or UI. Favor medium/wide expressive acting and listener reactions; no mouth closeups or precise lip-sync. "
                 )
             timing_repair = _timing_repair_instruction(feedback)
+            scene_repair = _scene_repair_instruction(feedback)
             prompt = (
                 f"Write the selected concept as a {policy['minimum']}-75 second DIALOGUE-FIRST skit. Default aim 65-75s. "
                 "Hard timing contract: return 188-192 spoken dialogue words across 20-23 meaningful turns; count only dialogue[].text, not action or visual fields. "
@@ -232,7 +243,7 @@ class DialogueStoryProvider(ChatStoryProvider):
                 "Before returning JSON, self-check the word count and add meaningful reaction/escalation turns if it is short; tighten redundant turns if it is long. Never pad, repeat a gag, slow speech or add dead air. "
                 "2-4 speaking characters; optional narrator ID narrator with under 20% of words. New cast/world/style allowed every video. "
                 "First line is ONLY a 4-5-word immediate hook. Then goal, conflict, causal escalation, at least three reaction/punchline beats and final earned payoff. "
-                "Natural short character-specific turns, no exposition dumps or generic narration. 8-12 scenes, each under 10 seconds, 1-3 lines each. "
+                "Natural short character-specific turns, no exposition dumps or generic narration. 8-12 contiguous scenes, each 1-3 dialogue lines and under 10 seconds; every line has at least two spoken words. "
                 "Return JSON with title, hook (exact opening text), ending_type=standalone unless a sequel truly improves it, sequel_possible:boolean, "
                 "characters:[{character_id,name,personality,speaking_style,visual_description,description,voice_profile_hint}], "
                 "dialogue:[{speaker_id,text,emotion,scene_number,action,listeners:[character_id]}] in playback order, "
@@ -240,7 +251,7 @@ class DialogueStoryProvider(ChatStoryProvider):
                 "art_direction:{style,environment}, story_beats:{setup,goal,conflict,escalation:[at least two causal beats],payoff}, "
                 "platform_metadata:{instagram:{caption},tiktok:{caption},youtube:{caption}}. No voice IDs, no existing characters. "
                 + visual_instructions +
-                timing_repair + f"Selected concept: {json.dumps(selected)}. Rewrite feedback: {feedback}"
+                timing_repair + scene_repair + f"Selected concept: {json.dumps(selected)}. Rewrite feedback: {feedback}"
             )
             normalized_story = None
             try:

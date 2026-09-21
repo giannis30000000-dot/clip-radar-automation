@@ -134,6 +134,24 @@ class DialogueTests(unittest.TestCase):
         self.assertEqual(provider.budget.events[0]["dialogue_word_count"], 40)
         self.assertLess(provider.budget.events[0]["estimated_dialogue_duration_seconds"], 65)
 
+    def test_scene_timing_schema_failure_gets_targeted_rewrite_instruction(self):
+        invalid_scene = demo()
+        invalid_scene["dialogue"] = [line for index, line in enumerate(invalid_scene["dialogue"]) if index != 0]
+        invalid_scene["dialogue"][0]["text"] = "I"
+        invalid_scene["dialogue"][-1]["text"] += " for once"
+        provider = DialogueStoryProvider(CostBudget(self.root / "scene-feedback.json", 0))
+        provider._request = Mock(side_effect=[
+            {"candidates": demo_candidates()},
+            invalid_scene,
+            demo(),
+            {"scores": {k: 9 for k in QUALITY_METRICS}},
+        ])
+        result = provider.generate(excluded_concepts=set())
+        self.assertEqual(result["story_quality"]["status"], "PASSED")
+        rewrite_prompt = provider._request.call_args_list[2].args[0]
+        self.assertIn("MANDATORY SCENE-TIMING REPAIR", rewrite_prompt)
+        self.assertIn("at least two spoken words", rewrite_prompt)
+
     def test_candidate_request_uses_strict_schema_for_supported_openai_model(self):
         payload = {"candidates": demo_candidates()}
         response = Mock(status_code=200, json=lambda: {"choices": [{"message": {"content": json.dumps(payload)}}], "usage": {"prompt_tokens": 20, "completion_tokens": 40}})
