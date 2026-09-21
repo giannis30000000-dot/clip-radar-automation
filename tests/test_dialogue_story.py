@@ -254,6 +254,23 @@ class DialogueTests(unittest.TestCase):
         self.assertIn("Unearned ending", provider._request.call_args_list[3].args[0])
         self.assertEqual(result["story_quality"]["status"], "PASSED")
 
+    def test_reaction_payoff_failure_gets_targeted_rewrite_instruction(self):
+        weak = demo()
+        weak["scenes"][-1]["payoff_moment"] = False
+        provider = DialogueStoryProvider(CostBudget(self.root / "payoff-feedback.json", 0))
+        provider._request = Mock(side_effect=[
+            {"candidates": demo_candidates()},
+            weak,
+            {"scores": {k: 9 for k in QUALITY_METRICS}},
+            demo(),
+            {"scores": {k: 9 for k in QUALITY_METRICS}},
+        ])
+        result = provider.generate(excluded_concepts=set())
+        self.assertEqual(result["story_quality"]["status"], "PASSED")
+        rewrite_prompt = provider._request.call_args_list[3].args[0]
+        self.assertIn("MANDATORY PAYOFF-STRUCTURE REPAIR", rewrite_prompt)
+        self.assertIn("payoff_moment:true", rewrite_prompt)
+
     def test_quality_attempt_limit_stops_instead_of_looping(self):
         provider = DialogueStoryProvider(CostBudget(self.root / "cost.json", 0))
         provider._request = Mock(side_effect=[{"candidates": demo_candidates()}] + [x for _ in range(3) for x in (demo(), {"scores": {k: 2 for k in QUALITY_METRICS}})])

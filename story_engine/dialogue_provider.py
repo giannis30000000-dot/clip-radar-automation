@@ -163,6 +163,15 @@ def _visual_bible_repair_instruction(feedback):
     )
 
 
+def _quality_repair_instruction(feedback):
+    if "reaction_payoffs" not in feedback:
+        return ""
+    return (
+        "MANDATORY PAYOFF-STRUCTURE REPAIR: create at least three distinct reaction or punchline beats in the dialogue, and set payoff_moment:true on their corresponding scenes. "
+        "The final scene must have payoff_moment:true and deliver the strongest earned payoff or twist; do not mark scenes mechanically without an actual beat. "
+    )
+
+
 class DialogueStoryProvider(ChatStoryProvider):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -258,6 +267,7 @@ class DialogueStoryProvider(ChatStoryProvider):
             scene_repair = _scene_repair_instruction(feedback)
             character_repair = _character_repair_instruction(feedback)
             visual_bible_repair = _visual_bible_repair_instruction(feedback)
+            quality_repair = _quality_repair_instruction(feedback)
             prompt = (
                 f"Write the selected concept as a {policy['minimum']}-75 second DIALOGUE-FIRST skit. Default aim 65-75s. "
                 "Hard timing contract: return 188-192 spoken dialogue words across exactly 20 dialogue objects; count only dialogue[].text, not action or visual fields. "
@@ -265,7 +275,7 @@ class DialogueStoryProvider(ChatStoryProvider):
                 "Before returning JSON, self-check the word count and add meaningful reaction/escalation turns if it is short; tighten redundant turns if it is long. Never pad, repeat a gag, slow speech or add dead air. "
                 "2-4 speaking characters; optional narrator ID narrator with under 20% of words. New cast/world/style allowed every video. "
                 "First dialogue line is ONLY a 4-5-word immediate hook; set hook character-for-character equal to dialogue[0].text, including punctuation and capitalization. Then goal, conflict, causal escalation, at least three reaction/punchline beats and final earned payoff. "
-                "Use exactly 10 contiguous scenes with exactly 2 dialogue lines per scene: line 1 is 4-5 words and lines 2-20 are conversational 9-11-word turns. No exposition dumps or generic narration; every line has at least two spoken words. "
+                "Use exactly 10 contiguous scenes with exactly 2 dialogue lines per scene: line 1 is 4-5 words and lines 2-20 are conversational 9-11-word turns. Include at least three real reaction/punchline beats, with payoff_moment:true on those scenes and on the final scene. No exposition dumps or generic narration; every line has at least two spoken words. "
                 "Return JSON with title, hook (exact opening text), ending_type=standalone unless a sequel truly improves it, sequel_possible:boolean, "
                 "characters:[{character_id,name,personality,speaking_style,visual_description,description,voice_profile_hint}], "
                 "dialogue:[{speaker_id,text,emotion,scene_number,action,listeners:[character_id]}] in playback order, "
@@ -273,7 +283,7 @@ class DialogueStoryProvider(ChatStoryProvider):
                 "art_direction:{style,environment}, story_beats:{setup,goal,conflict,escalation:[at least two causal beats],payoff}, "
                 "platform_metadata:{instagram:{caption},tiktok:{caption},youtube:{caption}}. No voice IDs, no existing characters. "
                 + visual_instructions +
-                timing_repair + scene_repair + character_repair + visual_bible_repair + f"Selected concept: {json.dumps(selected)}. Rewrite feedback: {feedback}"
+                timing_repair + scene_repair + character_repair + visual_bible_repair + quality_repair + f"Selected concept: {json.dumps(selected)}. Rewrite feedback: {feedback}"
             )
             normalized_story = None
             try:
