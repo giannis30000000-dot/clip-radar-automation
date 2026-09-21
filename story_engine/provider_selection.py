@@ -43,6 +43,7 @@ def production_provider(kind, default, budget, history=None):
     from .dialogue_demo import DialogueDemoProvider
     from .runway_provider import RunwayVisualProvider
     from .elevenlabs_provider import ElevenLabsVoiceProvider
+    from .production_review import strict_production
 
     requirements = {
         "script": ("STORY_LLM_API_KEY",),
@@ -55,11 +56,14 @@ def production_provider(kind, default, budget, history=None):
         requirements["voice"] = ("ELEVENLABS_API_KEY",)
     missing = [name for name in requirements[kind] if not os.getenv(name, "").strip()]
     if missing:
+        if strict_production():
+            raise ProviderFailure("PRODUCTION_CONFIGURATION_REQUIRED")
         budget.event(kind, "DEVELOPMENT_FALLBACK", missing_configuration=missing)
         return default()
     factories = {
         "script": lambda: DialogueStoryProvider(budget, history=history),
-        "visual": lambda: RunwayVisualProvider(budget),
+        "visual": lambda: RunwayVisualProvider(budget, max_attempts=1 if strict_production() else None),
         "voice": lambda: ElevenLabsVoiceProvider(budget),
     }
-    return FallbackProvider(factories[kind](), default(), budget, kind)
+    production = factories[kind]()
+    return production if strict_production() else FallbackProvider(production, default(), budget, kind)

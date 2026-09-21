@@ -12,9 +12,12 @@ from .costs import money, sanitize
 from .history import write_json
 from .provider_http import ProviderFailure, attempts, endpoint, rate, request_json
 from .providers import VisualAsset
+from .reference_images import image_input, image_descriptor, reference_prompt
 
 
 def scene_prompt(story, scene) -> str:
+    if story.get("visual_bible"):
+        return reference_prompt(story, scene, video=True)
     index = scene["scene_number"] - 1
     previous = story["scenes"][index-1]["visual_description"] if index else "Opening scene"
     cast = "; ".join(c["name"] + ": " + c["description"] for c in story["characters"] if c["character_id"] in scene["characters_present"])
@@ -49,7 +52,10 @@ class RunwayVisualProvider:
             raise ProviderFailure("UNSUPPORTED_RUNWAY_RATIO")
         payload = {"model": model, "promptText": scene_prompt(story, scene), "ratio": ratio, "duration": duration}
         route = "/text_to_video"
-        if scene.get("reference_image_url"):
+        if scene.get("reference_image_path"):
+            payload["promptImage"] = image_input(scene["reference_image_path"])
+            route = "/image_to_video"
+        elif scene.get("reference_image_url"):
             payload["promptImage"] = endpoint(scene["reference_image_url"])
             route = "/image_to_video"
         if model in {"gen4_turbo", "h3_max"} and route != "/image_to_video":
@@ -63,6 +69,10 @@ class RunwayVisualProvider:
         headers = {"Authorization": "Bearer " + os.environ["RUNWAYML_API_SECRET"], "X-Runway-Version": "2024-11-06"}
         report_path = directory / f"scene_{scene['scene_number']:02}.provider.json"
         report = {"provider": "runway", "model": model, "request": sanitize(payload), "attempts": []}
+        if scene.get("reference_image_path"):
+            report["request"]["promptImage"] = image_descriptor(scene["reference_image_path"])
+        if story.get("visual_bible"):
+            report["bible_sha256"] = story["visual_bible"]["sha256"]
         output = directory / f"scene_{scene['scene_number']:02}.mp4"
         for retry in range(maximum_attempts):
             record = self.budget.reserve("runway", model, price * duration, retry=retry, requested_seconds=duration, scene_number=scene["scene_number"])

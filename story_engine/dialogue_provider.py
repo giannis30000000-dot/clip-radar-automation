@@ -69,6 +69,18 @@ class DialogueStoryProvider(ChatStoryProvider):
         while self.script_attempts < max_attempts():
             self.script_attempts += 1
             policy = duration_policy()
+            visual_instructions = ""
+            if os.getenv("STORY_REFERENCE_PROVIDER") == "runway":
+                pool = json.loads(os.getenv("STORY_VOICE_POOL") or "[]")
+                visual_instructions = (
+                    f"Use 2-{min(4, len(pool)) if len(pool) >= 2 else 3} speaking characters, no narrator. "
+                    "Give each character visual_identity:{appearance,proportions,clothing_accessories,colors,facial_traits}. "
+                    "Each value 1-3 words; concrete distinctive designs, matching visual_description. "
+                    "Keep art_direction style and environment to 3-6 words each. "
+                    "All character IDs plus identity values and both art fields must total under 430 characters, for a compact shared visual bible. "
+                    "Every visual_prompt starts with the important physical action, camera directions 2-5 words. "
+                    "No visible text, signage, logos or UI. Favor medium/wide expressive acting and listener reactions; no mouth closeups or precise lip-sync. "
+                )
             prompt = (
                 f"Write the selected concept as a {policy['minimum']}-75 second DIALOGUE-FIRST skit. Default aim 65-75s, about 175-190 words at 165wpm plus brief turn pauses. "
                 "2-4 speaking characters; optional narrator ID narrator with under 20% of words. New cast/world/style allowed every video. "
@@ -80,6 +92,7 @@ class DialogueStoryProvider(ChatStoryProvider):
                 "scenes:[{scene_number,characters_present,visual_description,visual_prompt,action_direction,reaction_direction,camera_direction,sound_effect_hint,background_music_mood,transition_hint,payoff_moment:boolean}], "
                 "art_direction:{style,environment}, story_beats:{setup,goal,conflict,escalation:[at least two causal beats],payoff}, "
                 "platform_metadata:{instagram:{caption},tiktok:{caption},youtube:{caption}}. No voice IDs, no existing characters. "
+                + visual_instructions +
                 f"Selected concept: {json.dumps(selected)}. Rewrite feedback: {feedback}"
             )
             try:
@@ -88,6 +101,9 @@ class DialogueStoryProvider(ChatStoryProvider):
                 story["generation"] = {"provider": "dialogue-chat", "candidate_selection": self.selection, "script_attempts": self.script_attempts, "review_required": True}
                 story = normalize_dialogue(story)
                 validate_story(story)
+                if os.getenv("STORY_REFERENCE_PROVIDER") == "runway":
+                    from .reference_images import build_visual_bible
+                    story["visual_bible"] = build_visual_bible(story)
                 critique = self._request("Independently evaluate this script, not its author's confidence. Score each requested criterion 0-10 with minimum acceptable 7. Be strict about causal escalation, conversational dialogue, first-two-second hook, final payoff and 65-75s engagement without filler. Return {scores:{metric:number},issues:[short actionable issues]}. Criteria: " + json.dumps(QUALITY_METRICS) + ". Script: " + json.dumps(story), "editorial_critique")
                 story["generation"]["editorial_review"] = critique["scores"]
                 quality = evaluate_story(story)
@@ -98,8 +114,8 @@ class DialogueStoryProvider(ChatStoryProvider):
                     story["story_quality"] = quality
                     return story
                 feedback = json.dumps({"failed_checks": quality["failed_checks"], "issues": critique.get("issues", [])})
-            except (ValueError, KeyError, TypeError, IndexError, AttributeError, DuplicatePremise):
-                feedback = "Invalid schema, dialogue timing, duplicate premise or missing required fields; rewrite coherently."
+            except (ValueError, KeyError, TypeError, IndexError, AttributeError, DuplicatePremise) as exc:
+                feedback = "Invalid schema, dialogue timing, duplicate premise or missing required fields; rewrite coherently. " + str(sanitize(str(exc)))[:250]
             self.budget.event("story", "STORY_REWRITE_REQUIRED", attempt=self.script_attempts, feedback=feedback)
         raise ProviderFailure("STORY_QUALITY_ATTEMPTS_EXHAUSTED")
 

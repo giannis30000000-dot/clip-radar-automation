@@ -26,6 +26,10 @@ class VisualProvider(Protocol):
     def create(self, story: dict, scene: dict, directory: Path) -> VisualAsset: ...
 
 
+class ReferenceImageProvider(Protocol):
+    def create(self, story: dict, scene: dict | None, directory: Path, *, cast_reference: Path | None = None) -> VisualAsset: ...
+
+
 class NoNewPremise(RuntimeError):
     """An expected catalogue exhaustion, not an automation failure."""
 

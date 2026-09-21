@@ -20,6 +20,7 @@ from .voice import DevelopmentVoiceProvider
 from .costs import BudgetExceeded, CostBudget, sanitize
 from .dialogue import evaluate_story, max_attempts
 from .provider_http import ProviderFailure
+from .production_review import strict_production, production_preflight, prepare_references
 
 
 def generate_story_video(
@@ -54,6 +55,11 @@ def generate_story_video(
     story, folder, provider = None, None, None
     budget = None
     try:
+        if strict_production():
+            preflight = production_preflight()
+            write_json(root / "production_preflight.json", preflight)
+            if not preflight["ready"]:
+                return status("CONFIGURATION_REQUIRED", preflight=preflight)
         with history.locked():
             budget = CostBudget(root / "attempts" / uuid.uuid4().hex / "cost_report.json")
             base["cost_report"] = str(budget.paths[0])
@@ -94,6 +100,8 @@ def generate_story_video(
                         if quality_gate["status"] == "PASSED":
                             status("SYNTHESIZING_VOICE", story_id=story["story_id"], title=story["title"])
                             prepared_voice = voice.synthesize(story, folder / "audio" / f"attempt_{attempt+1}")
+                            if strict_production() and (prepared_voice[2].get("provider") != "elevenlabs-dialogue" or prepared_voice[2].get("development_only", True)):
+                                raise ProviderFailure("PRODUCTION_DIALOGUE_VOICE_REQUIRED")
                             quality_gate = evaluate_story(story)
                         write_json(folder / f"story_quality_attempt_{attempt+1}.json", quality_gate)
                         if quality_gate["status"] == "PASSED":
@@ -117,7 +125,21 @@ def generate_story_video(
                         return status("REVIEW_REQUIRED", reason="STORY_QUALITY_REJECTED_BEFORE_VISUALS", story_quality=quality_gate)
                 status("CREATING_SCENES", story_id=story["story_id"], title=story["title"])
                 visual = visual_provider or load_provider("visual", DevelopmentVisualProvider, budget=budget)
-                assets = [visual.create(story, scene, folder / "scenes") for scene in story["scenes"]]
+                if os.getenv("STORY_REFERENCE_PROVIDER") == "runway":
+                    if os.getenv("RUNWAY_MODEL") != "h3_max":
+                        raise ProviderFailure("AUTOMATIC_REFERENCE_PLAN_REQUIRES_H3_MAX")
+                    status("CREATING_REFERENCES", story_id=story["story_id"], title=story["title"])
+                    references = prepare_references(story, budget, folder)
+                    write_json(metadata_path, story)
+                    assets = []
+                    for scene, reference in zip(story["scenes"], references):
+                        status("CREATING_SCENE", scene_number=scene["scene_number"], story_id=story["story_id"])
+                        asset = visual.create(story, scene, folder / "scenes") if scene["visual_plan"]["kind"] == "video" else reference
+                        if strict_production() and asset.provider not in {"runway", "runway-reference"}:
+                            raise ProviderFailure("PRODUCTION_VISUAL_REQUIRED")
+                        assets.append(asset)
+                else:
+                    assets = [visual.create(story, scene, folder / "scenes") for scene in story["scenes"]]
                 if prepared_voice is None:
                     status("SYNTHESIZING_VOICE", story_id=story["story_id"], title=story["title"])
                     voice = voice_provider or load_provider("voice", DevelopmentVoiceProvider, budget=budget)
